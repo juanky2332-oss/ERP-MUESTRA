@@ -870,4 +870,33 @@ END $$;
 -- 7) Últimos ajustes sueltos (equivalente a fix_rls.sql del proyecto original)
 ALTER TABLE public.gastos ALTER COLUMN numero DROP NOT NULL;
 
+-- 8) Columnas y bucket descubiertos al usar la app en real (no estaban en
+-- ningún script del proyecto original: se habían añadido a mano en su Supabase)
+ALTER TABLE public.presupuestos ADD COLUMN IF NOT EXISTS cliente_codigo_postal TEXT;
+ALTER TABLE public.presupuestos ADD COLUMN IF NOT EXISTS cliente_ciudad TEXT;
+ALTER TABLE public.presupuestos ADD COLUMN IF NOT EXISTS cliente_provincia TEXT;
+
+ALTER TABLE public.albaranes ADD COLUMN IF NOT EXISTS cliente_codigo_postal TEXT;
+ALTER TABLE public.albaranes ADD COLUMN IF NOT EXISTS cliente_ciudad TEXT;
+ALTER TABLE public.albaranes ADD COLUMN IF NOT EXISTS cliente_provincia TEXT;
+ALTER TABLE public.albaranes ADD COLUMN IF NOT EXISTS descripcion TEXT;
+
+ALTER TABLE public.facturas ADD COLUMN IF NOT EXISTS cliente_codigo_postal TEXT;
+ALTER TABLE public.facturas ADD COLUMN IF NOT EXISTS cliente_ciudad TEXT;
+ALTER TABLE public.facturas ADD COLUMN IF NOT EXISTS cliente_provincia TEXT;
+
+ALTER TABLE public.gastos ADD COLUMN IF NOT EXISTS proveedor_cif TEXT;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('albaranes-firmados', 'albaranes-firmados', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Allow anon upload albaranes-firmados" ON storage.objects;
+CREATE POLICY "Allow anon upload albaranes-firmados" ON storage.objects
+  FOR INSERT TO anon WITH CHECK (bucket_id = 'albaranes-firmados');
+
+DROP POLICY IF EXISTS "Allow anon select albaranes-firmados" ON storage.objects;
+CREATE POLICY "Allow anon select albaranes-firmados" ON storage.objects
+  FOR SELECT TO anon USING (bucket_id = 'albaranes-firmados');
+
 SELECT 'Instalación de Empresa X completada correctamente' AS status;
