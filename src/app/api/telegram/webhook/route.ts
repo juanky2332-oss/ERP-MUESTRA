@@ -7,6 +7,17 @@ const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOK
 const KNOWN_COMMANDS = ['/start', '/ayuda', '/help', '/resumen', '/factura', '/presupuesto', '/cliente']
 const MAX_HISTORY = 10 // mensajes (usuario+asistente) que se conservan por chat
 
+/**
+ * El asistente IA escribe en markdown ligero (**negrita**). Telegram no
+ * entiende markdown con parse_mode HTML, así que escapamos el texto y
+ * convertimos **negrita** a <b>negrita</b> a mano, en ese orden exacto
+ * para no escapar las etiquetas que acabamos de generar nosotros.
+ */
+function markdownBoldToTelegramHtml(text: string): string {
+    const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return escaped.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+}
+
 async function sendMessage(chatId: string, text: string, html: boolean = false) {
     try {
         // Los comandos rápidos generan sus propias etiquetas <b> controladas.
@@ -138,7 +149,7 @@ export async function POST(req: NextRequest) {
         await supabase.from('telegram_links').update({ conversation: updatedHistory }).eq('id', linkRow.id)
     }
 
-    await sendMessage(chatId, reply, isKnownCommand)
+    await sendMessage(chatId, isKnownCommand ? reply : markdownBoldToTelegramHtml(reply), true)
 
     // Sin update_id: es un mensaje saliente nuestro, no de Telegram, y el
     // índice único de deduplicación solo aplica a update_id no nulos.
