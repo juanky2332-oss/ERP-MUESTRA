@@ -8,12 +8,26 @@ export async function createDocument(data: any, type: 'presupuesto' | 'albaran' 
     const supabase = await createClient()
 
     try {
-        // Crear una copia limpia de los datos y extraer info de origen
-        const { source_document_id, source_document_type, ...cleanData } = data
+        // Crear una copia limpia de los datos y extraer info de origen.
+        // albaran_origen_numero/presupuesto_origen_numero son solo para mostrar
+        // en el PDF en el momento de crear el documento: no son columnas reales
+        // de la tabla, así que nunca deben llegar al insert.
+        const {
+            source_document_id, source_document_type,
+            albaran_origen_numero, presupuesto_origen_numero,
+            ...cleanData
+        } = data
 
         const payloadToInsert = { ...cleanData }
-        delete (payloadToInsert as any).source_document_id
-        delete (payloadToInsert as any).source_document_type
+
+        // Enlace real con el documento de origen (usando las columnas que sí
+        // existen), para que "de dónde viene esto" quede guardado de verdad.
+        if (source_document_id && source_document_type === 'presupuesto' && type === 'albaran') {
+            (payloadToInsert as any).presupuesto_id = source_document_id
+        }
+        if (source_document_id && source_document_type === 'albaran' && type === 'factura') {
+            (payloadToInsert as any).albaran_ids = [source_document_id]
+        }
 
         // Generar número si no existe
         const numero = await getNextSequenceNumber(type, supabase)

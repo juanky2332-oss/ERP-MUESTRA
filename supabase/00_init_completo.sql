@@ -899,4 +899,23 @@ DROP POLICY IF EXISTS "Allow anon select albaranes-firmados" ON storage.objects;
 CREATE POLICY "Allow anon select albaranes-firmados" ON storage.objects
   FOR SELECT TO anon USING (bucket_id = 'albaranes-firmados');
 
+-- 9) Historial de correos enviados (lo usa la sección "Emails")
+CREATE TABLE IF NOT EXISTS public.notificaciones_historial (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  remitente TEXT,
+  destinatario TEXT,
+  tipo_documento TEXT,
+  numero_documento TEXT,
+  pedido_referencia TEXT,
+  asunto TEXT,
+  mensaje TEXT,
+  usuario_nombre TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+ALTER TABLE public.notificaciones_historial ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Acceso total notificaciones_historial" ON public.notificaciones_historial;
+CREATE POLICY "Acceso total notificaciones_historial" ON public.notificaciones_historial
+  FOR ALL USING (true) WITH CHECK (true);
+
 SELECT 'Instalación de Empresa X completada correctamente' AS status;

@@ -164,8 +164,16 @@ export function useBudgets({
             const year = new Date().getFullYear()
             const formattedNum = `P-${year}-${nextNum.toString().padStart(3, '0')}`
 
+            // source_document_id/type y *_origen_numero son campos solo para el
+            // PDF, no columnas reales de la tabla: nunca deben llegar al insert.
+            const {
+                source_document_id, source_document_type,
+                albaran_origen_numero, presupuesto_origen_numero,
+                ...cleanBudget
+            } = newBudget as any
+
             const payload = {
-                ...newBudget,
+                ...cleanBudget,
                 numero: formattedNum,
                 fecha: newBudget.fecha || new Date().toISOString()
             }
