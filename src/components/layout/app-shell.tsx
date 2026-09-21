@@ -1,13 +1,16 @@
 'use client'
 
 import { usePathname, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
     Search,
     User,
     Menu,
     Command,
     FileText,
-    LogOut
+    LogOut,
+    Send,
+    Bell,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
@@ -19,6 +22,8 @@ import { Sidebar, SidebarContent } from '@/components/layout/sidebar'
 import { Button } from '@/components/ui/button'
 import { useGlobalFilter } from '@/components/providers/global-filter-provider'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
+import { MobileBottomNav } from '@/components/layout/mobile-bottom-nav'
+import { QuickCreateMenu } from '@/components/layout/quick-create-menu'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname()
@@ -166,7 +171,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 md:gap-2">
+                        <div className="hidden md:block">
+                            <QuickCreateMenu />
+                        </div>
+
+                        <Link
+                            href="https://t.me/ERP_PRUEBA_bot"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Conectar/abrir el bot de Telegram del ERP"
+                            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950/40 transition-colors"
+                        >
+                            <Send className="h-3.5 w-3.5" />
+                            <span className="relative flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500" />
+                            </span>
+                        </Link>
+
+                        <Button variant="ghost" size="icon" className="rounded-xl relative text-slate-600" title="Notificaciones">
+                            <Bell className="h-4 w-4" />
+                        </Button>
+
                         <Button
                             variant="ghost"
                             size="sm"
@@ -184,12 +211,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     </div>
                 </header>
 
-                <main className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-8 lg:p-12 bg-slate-50/20">
+                <main className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-8 lg:p-12 pb-24 md:pb-12 bg-slate-50/20">
                     <div className="max-w-7xl mx-auto">
                         {children}
                     </div>
                 </main>
             </div>
+
+            <MobileBottomNav />
         </div>
     )
 }

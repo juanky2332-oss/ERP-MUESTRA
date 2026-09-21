@@ -13,21 +13,32 @@ import {
     Mail,
     ChevronLeft,
     ChevronRight,
+    Wrench,
+    CircleDollarSign,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 
-const navItems = [
+interface NavItem {
+    href: string
+    label: string
+    icon: React.ElementType
+    badge?: string
+}
+
+const navItems: NavItem[] = [
     { href: '/', label: 'Resumen', icon: LayoutDashboard },
     { href: '/presupuestos', label: 'Presupuestos', icon: FileText },
     { href: '/albaranes', label: 'Albaranes', icon: Box },
     { href: '/facturas', label: 'Facturas', icon: FileInput },
+    { href: '/cobros', label: 'Cobros y vencimientos', icon: CircleDollarSign, badge: 'Nuevo' },
+    { href: '/partes-de-trabajo', label: 'Partes de trabajo', icon: Wrench, badge: 'Nuevo' },
     { href: '/gastos', label: 'Gastos', icon: Receipt },
     { href: '/albaranes-firmados', label: 'Alb. Firmados', icon: FileText },
 ]
 
 const secondaryItems = [
-    { href: '/contactos', label: 'Contactos', icon: Users },
+    { href: '/contactos', label: 'Clientes', icon: Users },
     { href: '/calculadora', label: 'Calculadora', icon: Calculator },
     { href: '/emails', label: 'Emails', icon: Mail },
 ]
@@ -84,6 +95,11 @@ export function SidebarContent({ collapsed, pathname, onNavigate }: SidebarConte
                                     isActive ? "text-sidebar-primary" : "text-sidebar-foreground/70 group-hover:text-white"
                                 )} />
                                 {!collapsed && <span className="tracking-tight z-10 transition-transform duration-300 group-hover:translate-x-1">{item.label}</span>}
+                                {!collapsed && item.badge && !isActive && (
+                                    <span className="ml-auto z-10 text-[9px] font-black uppercase tracking-wide bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-full">
+                                        {item.badge}
+                                    </span>
+                                )}
                                 {isActive && !collapsed && (
                                     <div className="absolute right-3 w-1.5 h-1.5 rounded-full bg-sidebar-primary animate-pulse z-10" />
                                 )}
