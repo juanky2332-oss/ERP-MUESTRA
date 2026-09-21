@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Plus, FileText, Box, FileInput, Receipt, Wrench, CircleDollarSign } from "lucide-react"
+import { Plus, FileText, Box, FileInput, Receipt } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
@@ -12,8 +12,6 @@ const ACTIONS = [
     { href: "/albaranes/new", label: "Nuevo albarán", icon: Box, scheme: "text-orange-600 bg-orange-50 dark:bg-orange-950/40 dark:text-orange-400" },
     { href: "/facturas/new", label: "Nueva factura", icon: FileInput, scheme: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400" },
     { href: "/gastos/new", label: "Registrar gasto", icon: Receipt, scheme: "text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400" },
-    { href: "/partes-de-trabajo/new", label: "Nuevo parte de trabajo", icon: Wrench, scheme: "text-violet-600 bg-violet-50 dark:bg-violet-950/40 dark:text-violet-400" },
-    { href: "/cobros", label: "Registrar cobro", icon: CircleDollarSign, scheme: "text-amber-600 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400" },
 ]
 
 interface QuickCreateMenuProps {

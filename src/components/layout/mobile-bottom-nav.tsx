@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, Wrench, CircleDollarSign, Menu, Plus } from "lucide-react"
+import { LayoutDashboard, FileInput, FileText, Menu, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { QuickCreateMenu } from "@/components/layout/quick-create-menu"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
@@ -30,14 +30,14 @@ export function MobileBottomNav() {
                     Inicio
                 </Link>
                 <Link
-                    href="/partes-de-trabajo"
+                    href="/facturas"
                     className={cn(
                         "flex flex-col items-center justify-center gap-1 h-full text-[10px] font-bold",
-                        isActive("/partes-de-trabajo") ? "text-primary" : "text-muted-foreground"
+                        isActive("/facturas") ? "text-primary" : "text-muted-foreground"
                     )}
                 >
-                    <Wrench className="h-5 w-5" />
-                    Partes
+                    <FileInput className="h-5 w-5" />
+                    Facturas
                 </Link>
 
                 <div className="flex items-center justify-center">
@@ -51,14 +51,14 @@ export function MobileBottomNav() {
                 </div>
 
                 <Link
-                    href="/cobros"
+                    href="/presupuestos"
                     className={cn(
                         "flex flex-col items-center justify-center gap-1 h-full text-[10px] font-bold",
-                        isActive("/cobros") ? "text-primary" : "text-muted-foreground"
+                        isActive("/presupuestos") ? "text-primary" : "text-muted-foreground"
                     )}
                 >
-                    <CircleDollarSign className="h-5 w-5" />
-                    Cobros
+                    <FileText className="h-5 w-5" />
+                    Presup.
                 </Link>
 
                 <Sheet open={moreOpen} onOpenChange={setMoreOpen}>

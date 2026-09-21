@@ -1,8 +1,8 @@
-import { FileText, Box, FileInput, Receipt, Activity, TrendingUp, Clock, Mail, AlertTriangle, Wrench, CircleDollarSign, Send, ArrowRight } from "lucide-react"
+import { FileText, Box, FileInput, Receipt, Activity, TrendingUp, Clock, Mail, AlertTriangle, Send, ArrowRight, Users } from "lucide-react"
 import { createClient } from "@/lib/supabase/server"
 import { FinancialChart } from "@/components/dashboard/financial-chart"
 import Link from "next/link"
-import { format, startOfMonth, endOfMonth, differenceInCalendarDays } from "date-fns"
+import { format, startOfMonth, endOfMonth } from "date-fns"
 import { es } from "date-fns/locale"
 import { cn, formatCurrency } from "@/lib/utils"
 import { KpiCard } from "@/components/ui/kpi-card"
@@ -22,7 +22,7 @@ async function getStats(monthFilter: string | undefined) {
     { data: albaranesFirmados },
     { data: historial }
   ] = await Promise.all([
-    supabase.from('presupuestos').select('total, created_at, numero, cliente_razon_social, aceptado, rechazado').order('created_at', { ascending: false }),
+    supabase.from('presupuestos').select('total, created_at, numero, cliente_razon_social, aceptado, rechazado, statuses').order('created_at', { ascending: false }),
     supabase.from('albaranes').select('total, created_at').is('documento_firmado_url', null).order('created_at', { ascending: false }),
     supabase.from('facturas').select('total, created_at, estado, pagada, statuses, fecha_vencimiento, numero, cliente_razon_social, fecha').order('created_at', { ascending: false }),
     supabase.from('gastos').select('total, base_imponible, iva_importe, fecha, created_at').order('created_at', { ascending: false }),
@@ -86,8 +86,16 @@ async function getStats(monthFilter: string | undefined) {
     .slice(0, 5)
 
   // ---- Presupuestos pendientes de aceptación ----
-  const presupuestosPendientes = (presupuestos || []).filter((p: any) => !p.aceptado && !p.rechazado)
+  // Un presupuesto ya convertido en albarán ('traspasado' en su historial de
+  // estados) deja de estar "pendiente de decisión" aunque nadie haya marcado
+  // manualmente los booleanos aceptado/rechazado: el traspaso ES la decisión.
+  const presupuestosPendientes = (presupuestos || []).filter((p: any) =>
+    !p.aceptado && !p.rechazado && !(p.statuses || []).includes('traspasado')
+  )
   const totalPresupuestosPendientes = presupuestosPendientes.reduce((acc: number, p: any) => acc + (Number(p.total) || 0), 0)
+  const topPresupuestosPendientes = [...presupuestosPendientes]
+    .sort((a: any, b: any) => (Number(b.total) || 0) - (Number(a.total) || 0))
+    .slice(0, 5)
 
   return {
     totals: {
@@ -118,6 +126,7 @@ async function getStats(monthFilter: string | undefined) {
     presupuestosPendientes: {
       count: presupuestosPendientes.length,
       total: totalPresupuestosPendientes,
+      top: topPresupuestosPendientes,
     }
   }
 }
@@ -134,7 +143,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const params = await searchParams
   const monthFilter = params.month
   const stats = await getStats(monthFilter)
-  const today = new Date()
 
   const hasUrgent = stats.cobros.vencidasCount > 0
 
@@ -161,8 +169,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <p className="text-sm font-semibold flex-1">
               Tienes {stats.cobros.vencidasCount} factura{stats.cobros.vencidasCount !== 1 ? 's' : ''} vencida{stats.cobros.vencidasCount !== 1 ? 's' : ''} por {formatCurrency(stats.cobros.vencido)}.
             </p>
-            <Link href="/cobros" className="text-xs font-bold uppercase tracking-wide bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap">
-              Ver cobros
+            <Link href="/facturas" className="text-xs font-bold uppercase tracking-wide bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap">
+              Ver facturas
             </Link>
           </div>
         )}
@@ -172,50 +180,40 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <KpiCard title="Facturado este mes" value={formatCurrency(stats.cobros.facturadoEsteMes)} icon={FileInput} href="/facturas" scheme="blue" />
         <KpiCard title="Cobrado este mes" value={formatCurrency(stats.cobros.cobradoEsteMes)} icon={TrendingUp} href="/facturas" scheme="green" />
-        <KpiCard title="Pendiente de cobro" value={formatCurrency(stats.cobros.pendiente)} icon={Clock} href="/cobros" scheme="orange" />
-        <KpiCard title="Vencido" value={formatCurrency(stats.cobros.vencido)} subtitle={`${stats.cobros.vencidasCount} factura(s)`} icon={AlertTriangle} href="/cobros" scheme="red" />
+        <KpiCard title="Pendiente de cobro" value={formatCurrency(stats.cobros.pendiente)} icon={Clock} href="/facturas" scheme="orange" />
+        <KpiCard title="Vencido" value={formatCurrency(stats.cobros.vencido)} subtitle={`${stats.cobros.vencidasCount} factura(s)`} icon={AlertTriangle} href="/facturas" scheme="red" />
         <KpiCard title="Presupuestos pendientes" value={formatCurrency(stats.presupuestosPendientes.total)} subtitle={`${stats.presupuestosPendientes.count} por decidir`} icon={FileText} href="/presupuestos" scheme="purple" />
       </div>
 
       {/* Bloques operativos */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Cobros pendientes */}
+        {/* Presupuestos pendientes de decisión */}
         <div className="metric-card bg-card overflow-hidden">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-orange-50 dark:bg-orange-950/40 flex items-center justify-center">
-                <CircleDollarSign className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+              <div className="h-10 w-10 rounded-xl bg-violet-50 dark:bg-violet-950/40 flex items-center justify-center">
+                <FileText className="h-5 w-5 text-violet-600 dark:text-violet-400" />
               </div>
-              <h3 className="text-base font-extrabold text-foreground">Cobros pendientes</h3>
+              <h3 className="text-base font-extrabold text-foreground">Presupuestos por cerrar</h3>
             </div>
-            <Link href="/cobros" className="text-xs font-bold text-primary flex items-center gap-1 hover:gap-1.5 transition-all">
+            <Link href="/presupuestos" className="text-xs font-bold text-primary flex items-center gap-1 hover:gap-1.5 transition-all">
               Ver todo <ArrowRight className="h-3 w-3" />
             </Link>
           </div>
 
-          {stats.cobros.topPendientes.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-8">No hay facturas pendientes de cobro. 🎉</p>
+          {stats.presupuestosPendientes.top.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">No tienes presupuestos por decidir. 🎉</p>
           ) : (
             <div className="space-y-1">
-              {stats.cobros.topPendientes.map((f: any) => {
-                const isVencida = f.fecha_vencimiento && new Date(f.fecha_vencimiento) < today
-                const daysLeft = f.fecha_vencimiento ? differenceInCalendarDays(new Date(f.fecha_vencimiento), today) : null
-                return (
-                  <div key={f.numero} className="flex items-center justify-between py-3 border-b border-border last:border-0">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className={cn(
-                        "h-2 w-2 rounded-full shrink-0",
-                        isVencida ? "bg-rose-500" : daysLeft !== null && daysLeft <= 7 ? "bg-amber-500" : "bg-emerald-500"
-                      )} />
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-foreground truncate">{f.cliente_razon_social}</p>
-                        <p className="text-xs text-muted-foreground">{f.numero}{f.fecha_vencimiento ? ` · vence ${format(new Date(f.fecha_vencimiento), "d MMM", { locale: es })}` : ''}</p>
-                      </div>
-                    </div>
-                    <MoneyDisplay value={Number(f.total) || 0} size="sm" />
+              {stats.presupuestosPendientes.top.map((p: any) => (
+                <div key={p.numero} className="flex items-center justify-between py-3 border-b border-border last:border-0">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-foreground truncate">{p.cliente_razon_social}</p>
+                    <p className="text-xs text-muted-foreground">{p.numero}</p>
                   </div>
-                )
-              })}
+                  <MoneyDisplay value={Number(p.total) || 0} size="sm" />
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -225,11 +223,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <h3 className="text-base font-extrabold text-foreground mb-6">Acciones rápidas</h3>
           <div className="grid grid-cols-2 gap-3">
             <QuickAction href="/presupuestos/new" icon={FileText} label="Nuevo presupuesto" scheme="text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400" />
-            <QuickAction href="/partes-de-trabajo/new" icon={Wrench} label="Nuevo parte" scheme="text-violet-600 bg-violet-50 dark:bg-violet-950/40 dark:text-violet-400" />
-            <QuickAction href="/gastos/new" icon={Receipt} label="Registrar gasto" scheme="text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400" />
-            <QuickAction href="/cobros" icon={CircleDollarSign} label="Registrar cobro" scheme="text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400" />
-            <QuickAction href="https://t.me/ERP_PRUEBA_bot" icon={Send} label="Abrir Telegram" scheme="text-sky-600 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-400" external />
             <QuickAction href="/albaranes/new" icon={Box} label="Nuevo albarán" scheme="text-amber-600 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400" />
+            <QuickAction href="/facturas/new" icon={FileInput} label="Nueva factura" scheme="text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400" />
+            <QuickAction href="/gastos/new" icon={Receipt} label="Registrar gasto" scheme="text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400" />
+            <QuickAction href="/contactos" icon={Users} label="Clientes" scheme="text-slate-600 bg-slate-50 dark:bg-slate-800/60 dark:text-slate-300" />
+            <QuickAction href="https://t.me/ERP_PRUEBA_bot" icon={Send} label="Abrir Telegram" scheme="text-sky-600 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-400" external />
           </div>
         </div>
       </div>

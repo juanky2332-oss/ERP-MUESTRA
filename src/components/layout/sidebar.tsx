@@ -13,8 +13,6 @@ import {
     Mail,
     ChevronLeft,
     ChevronRight,
-    Wrench,
-    CircleDollarSign,
     Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -32,8 +30,6 @@ const navItems: NavItem[] = [
     { href: '/presupuestos', label: 'Presupuestos', icon: FileText },
     { href: '/albaranes', label: 'Albaranes', icon: Box },
     { href: '/facturas', label: 'Facturas', icon: FileInput },
-    { href: '/cobros', label: 'Cobros y vencimientos', icon: CircleDollarSign, badge: 'Nuevo' },
-    { href: '/partes-de-trabajo', label: 'Partes de trabajo', icon: Wrench, badge: 'Nuevo' },
     { href: '/gastos', label: 'Gastos', icon: Receipt },
     { href: '/albaranes-firmados', label: 'Alb. Firmados', icon: FileText },
 ]
