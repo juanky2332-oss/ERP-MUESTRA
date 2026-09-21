@@ -918,4 +918,19 @@ DROP POLICY IF EXISTS "Acceso total notificaciones_historial" ON public.notifica
 CREATE POLICY "Acceso total notificaciones_historial" ON public.notificaciones_historial
   FOR ALL USING (true) WITH CHECK (true);
 
+-- 10) Políticas RLS que faltaban del todo (tablas con RLS activado y CERO
+-- políticas, lo que bloquea cualquier acceso). precios_materiales lo lee la
+-- Calculadora directamente desde el navegador con la anon key.
+DROP POLICY IF EXISTS "Allow read precios_materiales" ON public.precios_materiales;
+CREATE POLICY "Allow read precios_materiales" ON public.precios_materiales FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow all document_status" ON public.document_status;
+CREATE POLICY "Allow all document_status" ON public.document_status FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all document_embeddings" ON public.document_embeddings;
+CREATE POLICY "Allow all document_embeddings" ON public.document_embeddings FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all logs" ON public.logs;
+CREATE POLICY "Allow all logs" ON public.logs FOR ALL USING (true) WITH CHECK (true);
+
 SELECT 'Instalación de Empresa X completada correctamente' AS status;
