@@ -3,14 +3,16 @@ import { es } from 'date-fns/locale'
 import { formatCurrency } from '@/lib/utils'
 import { OWN_COMPANY } from '@/lib/company'
 
-const HELP_TEXT = `<b>Comandos disponibles</b>
-/hoy — intervenciones de hoy
-/partes — partes de trabajo abiertos
+const HELP_TEXT = `<b>Comandos rápidos</b>
 /cliente NOMBRE — buscar un cliente
 /factura NUMERO — estado de una factura
 /presupuesto NUMERO — estado de un presupuesto
 /resumen — resumen económico del mes
-/ayuda — esta ayuda`
+/ayuda — esta ayuda
+
+También puedes escribirme cualquier pregunta en lenguaje normal
+("¿cuánto le hemos cobrado a Empresa A?", "hazme un presupuesto para...")
+y te responderé con los datos reales del ERP.`
 
 export async function handleCommand(supabase: any, text: string): Promise<string> {
     const [cmdRaw, ...rest] = text.trim().split(/\s+/)
@@ -23,14 +25,6 @@ export async function handleCommand(supabase: any, text: string): Promise<string
 
     if (cmd === '/ayuda' || cmd === '/help') {
         return HELP_TEXT
-    }
-
-    if (cmd === '/hoy') {
-        return handleHoy(supabase)
-    }
-
-    if (cmd === '/partes') {
-        return handlePartes(supabase)
     }
 
     if (cmd === '/resumen') {
@@ -52,59 +46,33 @@ export async function handleCommand(supabase: any, text: string): Promise<string
     return `No he entendido ese comando. Escribe /ayuda para ver lo que puedo hacer.`
 }
 
-async function handleHoy(supabase: any): Promise<string> {
-    const today = new Date().toISOString().split('T')[0]
-    const { data } = await supabase
-        .from('work_orders')
-        .select('numero, cliente_razon_social, status, tecnico_nombre')
-        .eq('service_date', today)
-        .order('created_at')
-
-    if (!data || data.length === 0) return '📅 No hay partes de trabajo programados para hoy.'
-
-    const lines = data.map((w: any) => `• <b>${w.numero}</b> — ${w.cliente_razon_social} (${w.status}${w.tecnico_nombre ? `, ${w.tecnico_nombre}` : ''})`)
-    return `📅 <b>Hoy tienes ${data.length} parte(s):</b>\n${lines.join('\n')}`
-}
-
-async function handlePartes(supabase: any): Promise<string> {
-    const { data } = await supabase
-        .from('work_orders')
-        .select('numero, cliente_razon_social, status')
-        .not('status', 'in', '(convertido,cancelado)')
-        .order('created_at', { ascending: false })
-        .limit(10)
-
-    if (!data || data.length === 0) return '✅ No tienes partes de trabajo abiertos.'
-
-    const lines = data.map((w: any) => `• <b>${w.numero}</b> — ${w.cliente_razon_social} (${w.status})`)
-    return `🔧 <b>Partes abiertos (${data.length}):</b>\n${lines.join('\n')}`
-}
-
 async function handleResumen(supabase: any): Promise<string> {
     const today = new Date()
     const start = startOfMonth(today).toISOString()
     const end = endOfMonth(today).toISOString()
 
-    const [{ data: facturasMes }, { data: pendientes }, { data: presupuestosPend }, { data: partesAbiertos }] = await Promise.all([
+    const [{ data: facturasMes }, { data: pendientes }, { data: presupuestosPend }] = await Promise.all([
         supabase.from('facturas').select('total, pagada, fecha_pago, created_at').gte('created_at', start).lte('created_at', end),
         supabase.from('facturas').select('total, fecha_vencimiento').eq('pagada', false),
-        supabase.from('presupuestos').select('total').eq('aceptado', false).eq('rechazado', false),
-        supabase.from('work_orders').select('id').not('status', 'in', '(convertido,cancelado)'),
+        supabase.from('presupuestos').select('total, aceptado, rechazado, statuses').eq('aceptado', false).eq('rechazado', false),
     ])
+
+    // Un presupuesto ya 'traspasado' (convertido en albarán) ya no cuenta
+    // como pendiente de decisión, aunque nadie marcara aceptado/rechazado.
+    const presupuestosRealmentePendientes = (presupuestosPend || []).filter((p: any) => !(p.statuses || []).includes('traspasado'))
 
     const facturado = (facturasMes || []).reduce((a: number, f: any) => a + Number(f.total), 0)
     const cobrado = (facturasMes || []).filter((f: any) => f.pagada).reduce((a: number, f: any) => a + Number(f.total), 0)
     const pendienteTotal = (pendientes || []).reduce((a: number, f: any) => a + Number(f.total), 0)
     const vencido = (pendientes || []).filter((f: any) => f.fecha_vencimiento && new Date(f.fecha_vencimiento) < today).reduce((a: number, f: any) => a + Number(f.total), 0)
-    const presupuestosTotal = (presupuestosPend || []).reduce((a: number, p: any) => a + Number(p.total), 0)
+    const presupuestosTotal = presupuestosRealmentePendientes.reduce((a: number, p: any) => a + Number(p.total), 0)
 
     return `📊 <b>Resumen de ${format(today, 'MMMM yyyy', { locale: es })}</b>
 Facturado: ${formatCurrency(facturado)}
 Cobrado: ${formatCurrency(cobrado)}
 Pendiente de cobro: ${formatCurrency(pendienteTotal)}
 Vencido: ${formatCurrency(vencido)}
-Presupuestos por decidir: ${(presupuestosPend || []).length} (${formatCurrency(presupuestosTotal)})
-Partes abiertos: ${(partesAbiertos || []).length}`
+Presupuestos por decidir: ${presupuestosRealmentePendientes.length} (${formatCurrency(presupuestosTotal)})`
 }
 
 async function handleFactura(supabase: any, numero: string): Promise<string> {
