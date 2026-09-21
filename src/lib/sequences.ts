@@ -1,18 +1,20 @@
 import { createClient } from '@/lib/supabase/server'
 import { supabase } from '@/lib/supabase'
 
-export async function getNextSequenceNumber(type: 'presupuesto' | 'albaran' | 'factura' | 'gasto', customClient?: any): Promise<string> {
+export async function getNextSequenceNumber(type: 'presupuesto' | 'albaran' | 'factura' | 'gasto' | 'parte', customClient?: any): Promise<string> {
     const tableMap = {
         'presupuesto': 'presupuestos',
         'albaran': 'albaranes',
         'factura': 'facturas',
-        'gasto': 'gastos'
+        'gasto': 'gastos',
+        'parte': 'work_orders'
     }
     const prefixMap = {
         'presupuesto': 'PREP',
         'albaran': 'ALB',
         'factura': 'FAC',
-        'gasto': 'G'
+        'gasto': 'G',
+        'parte': 'PT'
     }
     const table = tableMap[type]
     const prefix = prefixMap[type]

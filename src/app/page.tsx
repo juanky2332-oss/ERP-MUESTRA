@@ -225,7 +225,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <h3 className="text-base font-extrabold text-foreground mb-6">Acciones rápidas</h3>
           <div className="grid grid-cols-2 gap-3">
             <QuickAction href="/presupuestos/new" icon={FileText} label="Nuevo presupuesto" scheme="text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400" />
-            <QuickAction href="/partes-de-trabajo" icon={Wrench} label="Nuevo parte" scheme="text-violet-600 bg-violet-50 dark:bg-violet-950/40 dark:text-violet-400" />
+            <QuickAction href="/partes-de-trabajo/new" icon={Wrench} label="Nuevo parte" scheme="text-violet-600 bg-violet-50 dark:bg-violet-950/40 dark:text-violet-400" />
             <QuickAction href="/gastos/new" icon={Receipt} label="Registrar gasto" scheme="text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400" />
             <QuickAction href="/cobros" icon={CircleDollarSign} label="Registrar cobro" scheme="text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400" />
             <QuickAction href="https://t.me/ERP_PRUEBA_bot" icon={Send} label="Abrir Telegram" scheme="text-sky-600 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-400" external />

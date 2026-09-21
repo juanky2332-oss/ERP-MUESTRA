@@ -1,4 +1,4 @@
-import { Check, Clock, Send, Eye, X, AlertTriangle, FileEdit, ArrowRightCircle, CircleDollarSign, XCircle } from "lucide-react"
+import { Check, Clock, Send, Eye, X, AlertTriangle, FileEdit, ArrowRightCircle, CircleDollarSign, XCircle, Calendar, PlayCircle, HelpCircle, ThumbsUp, Ban } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export type StatusKey =
@@ -18,6 +18,13 @@ export type StatusKey =
     | "confirmado"
     | "fallido"
     | "reembolsado"
+    | "programado"
+    | "en_curso"
+    | "pendiente_informacion"
+    | "pendiente_aprobacion"
+    | "terminado"
+    | "convertido"
+    | "cancelado"
 
 const STATUS_CONFIG: Record<StatusKey, { label: string; icon: React.ElementType; className: string }> = {
     borrador: { label: "Borrador", icon: FileEdit, className: "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700" },
@@ -36,6 +43,13 @@ const STATUS_CONFIG: Record<StatusKey, { label: string; icon: React.ElementType;
     confirmado: { label: "Confirmado", icon: Check, className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900" },
     fallido: { label: "Fallido", icon: X, className: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900" },
     reembolsado: { label: "Reembolsado", icon: ArrowRightCircle, className: "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700" },
+    programado: { label: "Programado", icon: Calendar, className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-900" },
+    en_curso: { label: "En curso", icon: PlayCircle, className: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950 dark:text-violet-300 dark:border-violet-900" },
+    pendiente_informacion: { label: "Falta información", icon: HelpCircle, className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900" },
+    pendiente_aprobacion: { label: "Pendiente de aprobación", icon: Clock, className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900" },
+    terminado: { label: "Terminado", icon: ThumbsUp, className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900" },
+    convertido: { label: "Convertido a albarán", icon: ArrowRightCircle, className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900" },
+    cancelado: { label: "Cancelado", icon: Ban, className: "bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700" },
 }
 
 interface StatusBadgeProps {

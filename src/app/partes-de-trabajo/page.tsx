@@ -1,22 +1,14 @@
-import { Wrench } from "lucide-react"
-import { ComingSoon } from "@/components/ui/coming-soon"
+import { createClient } from '@/lib/supabase/server'
+import { WorkOrdersList } from '@/components/work-orders/work-orders-list'
 
-export default function PartesDeTrabajoPage() {
-    return (
-        <ComingSoon
-            title="Partes de trabajo"
-            description="Registra cada intervención en campo y conviértela en albarán sin volver a teclear nada."
-            icon={Wrench}
-            breadcrumbLabel="Partes de trabajo"
-            features={[
-                "Tarifa de mano de obra y desplazamiento aplicada automáticamente según el cliente",
-                "Cálculo en vivo de horas, desplazamiento, materiales, IVA y total",
-                "Fotos y documentos de la intervención adjuntos al parte y al PDF del albarán",
-                "Checklist de información pendiente antes de poder facturar",
-                "Firma del técnico y del cliente desde el móvil",
-                "Conversión a albarán con un clic, sin duplicar documentos",
-                "Creación de partes por Telegram: texto, foto, audio o dictado de voz",
-            ]}
-        />
-    )
+export const dynamic = 'force-dynamic'
+
+export default async function PartesDeTrabajoPage() {
+    const supabase = await createClient()
+    const { data: workOrders } = await supabase
+        .from('work_orders')
+        .select('id, numero, service_date, cliente_razon_social, tecnico_nombre, status, total, missing_information, related_delivery_note_id')
+        .order('created_at', { ascending: false })
+
+    return <WorkOrdersList workOrders={workOrders || []} />
 }

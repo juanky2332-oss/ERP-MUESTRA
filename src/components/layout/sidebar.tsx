@@ -15,6 +15,7 @@ import {
     ChevronRight,
     Wrench,
     CircleDollarSign,
+    Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
@@ -41,6 +42,7 @@ const secondaryItems = [
     { href: '/contactos', label: 'Clientes', icon: Users },
     { href: '/calculadora', label: 'Calculadora', icon: Calculator },
     { href: '/emails', label: 'Emails', icon: Mail },
+    { href: '/ajustes', label: 'Ajustes', icon: Settings },
 ]
 
 // 1. EXTRAEMOS LA INTERFAZ AQUÍ ARRIBA
