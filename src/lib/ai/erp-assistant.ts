@@ -190,8 +190,8 @@ const tools = [
     {
         type: "function",
         function: {
-            name: "crear_presupuesto",
-            description: "Crea un presupuesto REAL en el sistema. Solo llama a esta función cuando el usuario haya confirmado explícitamente (en este mensaje o en uno anterior de la conversación) que quiere crearlo, y tengas cliente y al menos una línea con importe. Si falta algo, PREGÚNTALO antes de llamar a esta función; no inventes datos.",
+            name: "previsualizar_presupuesto",
+            description: "Calcula (SIN GUARDAR NADA) cómo quedaría un presupuesto: totales, IVA y si el cliente existe. Llama SIEMPRE a esta función primero cuando el usuario pida crear un presupuesto, incluso si ya te ha dado todos los datos. Nunca escribe en la base de datos.",
             parameters: {
                 type: "object",
                 properties: {
@@ -209,6 +209,34 @@ const tools = [
                         }
                     },
                     iva_porcentaje: { type: "number", description: "Por defecto 21 si no se indica" },
+                    observaciones: { type: "string" }
+                },
+                required: ["client_name", "lineas"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "crear_presupuesto_confirmado",
+            description: "Crea el presupuesto DE VERDAD en el sistema (acción irreversible). SOLO se puede llamar inmediatamente después de que el usuario, en SU ÚLTIMO MENSAJE (el más reciente, no uno antiguo), haya respondido afirmativamente (sí, confirmo, adelante, dale, créalo...) a una previsualización que TÚ le mostraste antes con previsualizar_presupuesto. Si el último mensaje del usuario no es una confirmación clara y explícita, NO llames a esta función: vuelve a previsualizar o pregunta.",
+            parameters: {
+                type: "object",
+                properties: {
+                    client_name: { type: "string" },
+                    lineas: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                descripcion: { type: "string" },
+                                cantidad: { type: "number" },
+                                precio_unitario: { type: "number" }
+                            },
+                            required: ["descripcion", "cantidad", "precio_unitario"]
+                        }
+                    },
+                    iva_porcentaje: { type: "number" },
                     observaciones: { type: "string" }
                 },
                 required: ["client_name", "lineas"]
@@ -301,13 +329,21 @@ Si el usuario dice "pero yo creo que son X€" y los datos dicen Y€:
 Si el usuario insiste con una cifra incorrecta, repite los datos reales.
 
 ════════════════════════════════════════════
-📄 CREACIÓN DE DOCUMENTOS (crear_presupuesto)
+📄 CREACIÓN DE DOCUMENTOS — PROCESO EN DOS PASOS OBLIGATORIO
 ════════════════════════════════════════════
-Puedes crear presupuestos de verdad con la tool crear_presupuesto. Reglas:
-- Necesitas el nombre del cliente (debe existir ya en contactos; si no lo encuentras, dilo y pide que lo den de alta primero en el ERP) y al menos una línea con descripción, cantidad y precio.
-- Si el usuario no ha dado todos los datos, PREGÚNTALOS uno a uno, no inventes cantidades ni precios.
-- Antes de llamar a la tool, resume lo que vas a crear (cliente, líneas, total aproximado) y espera un "sí"/"confirmar" del usuario en el mensaje actual o inmediatamente anterior. No crees nada sin esa confirmación explícita.
-- Tras crear el documento, confirma el número de presupuesto generado.
+Crear un presupuesto es una acción real e irreversible. SIEMPRE en dos pasos, NUNCA en uno:
+
+PASO 1 — Cuando el usuario pida crear un presupuesto (aunque te dé todos los datos en el mismo mensaje):
+→ Llama a previsualizar_presupuesto (no guarda nada).
+→ Si falta el cliente o las líneas, PREGÚNTALO antes de llamar a la tool; no inventes cantidades ni precios.
+→ Con el resultado, muestra al usuario un resumen claro (cliente, líneas, IVA, total) y pregúntale explícitamente: "¿Confirmas que lo cree?".
+→ TERMINA tu respuesta ahí. No llames a crear_presupuesto_confirmado en este mismo turno.
+
+PASO 2 — Solo en un turno POSTERIOR, si el ÚLTIMO mensaje del usuario es una confirmación clara ("sí", "confirmo", "adelante", "créalo", "dale"):
+→ Ahora sí, llama a crear_presupuesto_confirmado con los mismos datos ya previsualizados.
+→ Confirma el número de presupuesto generado y el total.
+
+Si el último mensaje del usuario NO es una confirmación explícita (es una pregunta, un cambio de tema, o datos nuevos), vuelve a previsualizar_presupuesto, nunca llames directamente a crear_presupuesto_confirmado.
 
 ════════════════════════════════════════════
 📌 CÓMO INTERPRETAR PREGUNTAS DE DATOS
@@ -354,7 +390,8 @@ get_albaranes_firmados → Albaranes con firma digital
 get_email_history      → Historial de correos enviados
 get_pending_items      → Elementos pendientes de acción
 search_documents       → Búsqueda libre en todos los documentos
-crear_presupuesto      → Crear un presupuesto real (con confirmación previa del usuario)
+previsualizar_presupuesto     → Paso 1: calcula un presupuesto sin guardar nada
+crear_presupuesto_confirmado  → Paso 2: crea el presupuesto de verdad, solo tras confirmación explícita
 
 ════════════════════════════════════════════
 📋 FORMATO DE RESPUESTA
@@ -572,23 +609,36 @@ async function executeTool(supabase: any, name: string, args: any): Promise<any>
         }
     }
 
-    // 10. CREAR PRESUPUESTO (acción real)
-    if (name === 'crear_presupuesto') {
-        const { data: contacto } = await supabase.from('contactos').select('*').ilike('razon_social', `%${args.client_name}%`).limit(1).maybeSingle()
+    // 10. PREVISUALIZAR PRESUPUESTO (paso 1 — nunca escribe en la base de datos)
+    if (name === 'previsualizar_presupuesto') {
+        const { data: contacto } = await supabase.from('contactos').select('id, razon_social, cif').ilike('razon_social', `%${args.client_name}%`).limit(1).maybeSingle()
         if (!contacto) {
-            return { error: `No existe ningún cliente que coincida con "${args.client_name}". Debe darse de alta primero en el ERP (sección Clientes) antes de poder crear un presupuesto para él.` }
+            return { existe_cliente: false, error: `No existe ningún cliente que coincida con "${args.client_name}". Debe darse de alta primero en el ERP (sección Clientes) antes de poder crear un presupuesto para él.` }
         }
 
-        const lineas = (args.lineas || []).map((l: any) => ({
-            descripcion: l.descripcion,
-            cantidad: Number(l.cantidad) || 1,
-            precio_unitario: Number(l.precio_unitario) || 0,
-        }))
-        const base = lineas.reduce((acc: number, l: any) => acc + l.cantidad * l.precio_unitario, 0)
-        const ivaPct = Number(args.iva_porcentaje) || 21
-        const ivaImporte = Math.round(base * (ivaPct / 100) * 100) / 100
-        const total = Math.round((base + ivaImporte) * 100) / 100
+        const { base, ivaPct, ivaImporte, total } = computePresupuestoTotals(args)
 
+        return {
+            existe_cliente: true,
+            cliente: contacto.razon_social,
+            lineas: args.lineas,
+            base_imponible_exacta: formatEuro(base),
+            iva_porcentaje: ivaPct,
+            iva_importe_exacto: formatEuro(ivaImporte),
+            total_exacto: formatEuro(total),
+            guardado: false,
+            instruccion_para_el_modelo: "Esto es solo una previsualización, NO se ha guardado nada. Resume esto al usuario y pregúntale si confirma. No llames a crear_presupuesto_confirmado en este mismo turno."
+        }
+    }
+
+    // 11. CREAR PRESUPUESTO CONFIRMADO (paso 2 — acción real e irreversible)
+    if (name === 'crear_presupuesto_confirmado') {
+        const { data: contacto } = await supabase.from('contactos').select('*').ilike('razon_social', `%${args.client_name}%`).limit(1).maybeSingle()
+        if (!contacto) {
+            return { error: `No existe ningún cliente que coincida con "${args.client_name}".` }
+        }
+
+        const { lineas, base, ivaPct, ivaImporte, total } = computePresupuestoTotals(args)
         const numero = await getNextSequenceNumber('presupuesto', supabase)
 
         const { data: inserted, error } = await supabase.from('presupuestos').insert({
@@ -624,6 +674,19 @@ async function executeTool(supabase: any, name: string, args: any): Promise<any>
     return { error: `Herramienta desconocida: ${name}` }
 }
 
+function computePresupuestoTotals(args: any) {
+    const lineas = (args.lineas || []).map((l: any) => ({
+        descripcion: l.descripcion,
+        cantidad: Number(l.cantidad) || 1,
+        precio_unitario: Number(l.precio_unitario) || 0,
+    }))
+    const base = lineas.reduce((acc: number, l: any) => acc + l.cantidad * l.precio_unitario, 0)
+    const ivaPct = Number(args.iva_porcentaje) || 21
+    const ivaImporte = Math.round(base * (ivaPct / 100) * 100) / 100
+    const total = Math.round((base + ivaImporte) * 100) / 100
+    return { lineas, base, ivaPct, ivaImporte, total }
+}
+
 /** Ejecuta el asistente ERP (mismo motor que usa el widget de chat web) sobre una conversación dada. */
 export async function runErpAssistant(supabase: any, messages: ChatMessage[]): Promise<string> {
     const systemContent = SYSTEM_PROMPT
@@ -643,10 +706,31 @@ export async function runErpAssistant(supabase: any, messages: ChatMessage[]): P
         return message.content || 'No he podido generar una respuesta.'
     }
 
+    // Red de seguridad server-side, independiente del criterio del modelo:
+    // crear_presupuesto_confirmado solo se ejecuta si el último mensaje real
+    // del usuario es una confirmación explícita y corta. Si el modelo se
+    // salta el paso de previsualización, esto lo bloquea igualmente.
+    const lastUserMessage = [...messages].reverse().find(m => m.role === 'user')?.content?.trim().toLowerCase() || ''
+    const isExplicitConfirmation = /^(s[ií]|si\b|confirmo|confirmar|adelante|dale|vale|ok|correcto|hazlo|cr[eé]a(lo)?|crear|proceed|yes)\b/.test(lastUserMessage)
+        && lastUserMessage.length < 40
+
     const toolMessages = []
     for (const toolCall of message.tool_calls) {
         const args = JSON.parse((toolCall as any).function.arguments || '{}')
-        const result = await executeTool(supabase, (toolCall as any).function.name, args)
+        const name = (toolCall as any).function.name
+
+        if (name === 'crear_presupuesto_confirmado' && !isExplicitConfirmation) {
+            toolMessages.push({
+                tool_call_id: toolCall.id,
+                role: "tool" as const,
+                content: JSON.stringify({
+                    error: 'BLOQUEADO: el último mensaje del usuario no es una confirmación explícita y corta. No se ha creado nada. Vuelve a previsualizar_presupuesto y pide confirmación de nuevo.'
+                }),
+            })
+            continue
+        }
+
+        const result = await executeTool(supabase, name, args)
         toolMessages.push({
             tool_call_id: toolCall.id,
             role: "tool" as const,
