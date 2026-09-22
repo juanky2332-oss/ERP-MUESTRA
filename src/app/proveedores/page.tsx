@@ -149,7 +149,7 @@ export default function ProveedoresPage() {
             <Sheet open={!!ficha} onOpenChange={v => !v && setFicha(null)}>
                 <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
                     {!ficha || ficha.cargando ? (
-                        <div className="flex justify-center py-24"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                        <div className="flex justify-center py-24"><SheetTitle className="sr-only">Cargando ficha</SheetTitle><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
                     ) : (
                         <>
                             <SheetHeader>

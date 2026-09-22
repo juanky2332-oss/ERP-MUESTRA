@@ -71,7 +71,7 @@ export function FichaClienteSheet({ clienteId, open, onOpenChange, onEditar }: {
         <Sheet open={open} onOpenChange={onOpenChange}>
             <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
                 {!d ? (
-                    <div className="flex justify-center py-24"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                    <div className="flex justify-center py-24"><SheetTitle className="sr-only">Cargando ficha</SheetTitle><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
                 ) : (
                     <>
                         <SheetHeader>
