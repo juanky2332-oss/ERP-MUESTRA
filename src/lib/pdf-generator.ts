@@ -242,7 +242,8 @@
               cellPadding: 4,
               valign: 'top',
               textColor: 0,
-              font: 'helvetica'
+              font: 'helvetica',
+              overflow: 'linebreak',
           },
           columnStyles: {
               0: { cellWidth: colWidths.desc },

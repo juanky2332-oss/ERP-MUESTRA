@@ -104,6 +104,7 @@ test('precio con mercado solo mueve la parte sensible', () => {
     cerca(ratioIndice('laton', { ...INDICES_REFERENCIA })!, 1)
 })
 
-test('descripción de línea de presupuesto', () => {
-    assert.equal(descripcionPieza('Eje', 'redonda', { D: 40, L: 120 }, 'Acero C45', 1.184), 'Eje · Ø40×120 mm · Acero C45 · 1,184 kg/ud')
+test('descripción de línea de presupuesto en varias líneas', () => {
+    assert.equal(descripcionPieza('Eje', 'redonda', { D: 40, L: 120 }, 'Acero C45', 1.184, undefined, { norma: 'EN 10083' }), 'Eje\nBarra redonda Ø40 × 120 mm\nMaterial: Acero C45 · EN 10083\nPeso aprox.: 1,184 kg/ud')
+    assert.ok(!descripcionPieza('Eje', 'redonda', { D: 40, L: 120 }, 'Acero C45', 1.184, undefined, { incluirPeso: false }).includes('kg'))
 })

@@ -330,10 +330,11 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
                                 {fields.map((field, index) => (
                                     <TableRow key={field.id}>
                                         <TableCell>
-                                            <Input
+                                            <Textarea
                                                 {...form.register(`lineas.${index}.descripcion`)}
+                                                rows={1}
                                                 placeholder="Descripción del servicio/producto"
-                                                className="border-0 bg-transparent focus-visible:ring-0 px-0 shadow-none"
+                                                className="border-0 bg-transparent focus-visible:ring-0 px-0 shadow-none min-h-9 field-sizing-content resize-none"
                                             />
                                         </TableCell>
                                         <TableCell>

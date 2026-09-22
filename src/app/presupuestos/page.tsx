@@ -24,6 +24,7 @@ import { GlobalDateSelector } from '@/components/ui/global-date-selector'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
     Dialog,
     DialogContent,
@@ -366,7 +367,7 @@ export default function PresupuestosPage() {
                                     <Label className="text-xs text-slate-500 font-bold uppercase mb-2 block">Líneas</Label>
                                     {(editingBudget.lineas || []).map((linea: any, idx: number) => (
                                         <div key={idx} className="grid grid-cols-12 gap-2 mb-2 items-center">
-                                            <Input className="col-span-6" placeholder="Descripción" value={linea.descripcion || ''} onChange={e => { const l = [...editingBudget.lineas]; l[idx] = { ...l[idx], descripcion: e.target.value }; setEditingBudget({ ...editingBudget, lineas: l }) }} />
+                                            <Textarea rows={1} className="col-span-6 min-h-9 field-sizing-content resize-none" placeholder="Descripción" value={linea.descripcion || ''} onChange={e => { const l = [...editingBudget.lineas]; l[idx] = { ...l[idx], descripcion: e.target.value }; setEditingBudget({ ...editingBudget, lineas: l }) }} />
                                             <Input className="col-span-2 text-center" type="number" step="0.01" placeholder="Cant." value={linea.cantidad || ''} onChange={e => { const l = [...editingBudget.lineas]; l[idx] = { ...l[idx], cantidad: e.target.value }; setEditingBudget({ ...editingBudget, lineas: l }) }} />
                                             <Input className="col-span-3 text-right" type="number" step="0.01" placeholder="Precio" value={linea.precio_unitario || ''} onChange={e => { const l = [...editingBudget.lineas]; l[idx] = { ...l[idx], precio_unitario: e.target.value }; setEditingBudget({ ...editingBudget, lineas: l }) }} />
                                             <Button type="button" variant="ghost" size="icon" className="col-span-1 text-rose-500" onClick={() => { const l = editingBudget.lineas.filter((_: any, i: number) => i !== idx); setEditingBudget({ ...editingBudget, lineas: l }) }}>

@@ -297,28 +297,45 @@ export function seccionCm2(forma: FormaId, b: Record<string, number>, densidad: 
     return volumenCm3(forma, b, densidad, perfil) / (n(b[f.largo]) / 10)
 }
 
-/** Texto de línea de presupuesto: "Eje Ø40×120 mm · Acero C45 · 1,18 kg/ud". */
-export function descripcionPieza(nombrePieza: string, forma: FormaId, fin: Record<string, number>, nombreMaterial: string, pesoNeto: number, perfil?: { serie: string; talla: string }): string {
-    const x = (v: number) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100).replace('.', ','))
-    let medidas = ''
+/** Nombre de la forma en bruto para la descripción ("Barra redonda", "Chapa"...). */
+const NOMBRE_FORMA: Partial<Record<FormaId, string>> = {
+    redonda: 'Barra redonda', cuadrada: 'Barra cuadrada', hexagonal: 'Barra hexagonal', octogonal: 'Barra octogonal',
+    pletina: 'Pletina', tubo: 'Tubo redondo', tubo_rect: 'Tubo rectangular', chapa: 'Placa', disco: 'Disco',
+    anillo: 'Anillo', angular: 'Angular', perfil_u: 'Perfil U', perfil_t: 'Perfil T', perfil_std: 'Perfil', esfera: 'Esfera',
+}
+
+export function medidasTexto(forma: FormaId, fin: Record<string, number>, perfil?: { serie: string; talla: string }): string {
+    const x = (v: number) => (Number.isInteger(Number(v)) ? String(Number(v) || 0) : String(Math.round(Number(v) * 100) / 100).replace('.', ','))
     switch (forma) {
-        case 'redonda': medidas = `Ø${x(fin.D)}×${x(fin.L)} mm`; break
-        case 'cuadrada': medidas = `□${x(fin.A)}×${x(fin.L)} mm`; break
-        case 'hexagonal': medidas = `hex ${x(fin.S)}×${x(fin.L)} mm`; break
-        case 'octogonal': medidas = `oct ${x(fin.S)}×${x(fin.L)} mm`; break
-        case 'pletina': medidas = `${x(fin.A)}×${x(fin.E)}×${x(fin.L)} mm`; break
-        case 'tubo': medidas = `Ø${x(fin.D)}×${x(fin.E)}×${x(fin.L)} mm`; break
-        case 'tubo_rect': medidas = `${x(fin.A)}×${x(fin.B)}×${x(fin.E)}×${x(fin.L)} mm`; break
-        case 'chapa': medidas = `${x(fin.A)}×${x(fin.B)}×${x(fin.E)} mm`; break
-        case 'disco': medidas = `Ø${x(fin.D)}×${x(fin.E)} mm`; break
-        case 'anillo': medidas = `Ø${x(fin.D)}/Ø${x(fin.d)}×${x(fin.E)} mm`; break
-        case 'angular': medidas = `L ${x(fin.A)}×${x(fin.B)}×${x(fin.E)}×${x(fin.L)} mm`; break
-        case 'perfil_u': medidas = `U ${x(fin.A)}×${x(fin.B)}×${x(fin.E)}×${x(fin.L)} mm`; break
-        case 'perfil_t': medidas = `T ${x(fin.A)}×${x(fin.B)}×${x(fin.E)}×${x(fin.L)} mm`; break
-        case 'perfil_std': medidas = `${perfil?.serie || ''} ${perfil?.talla || ''} × ${x(fin.L)} mm`; break
-        case 'esfera': medidas = `esfera Ø${x(fin.D)} mm`; break
-        default: medidas = ''
+        case 'redonda': return `Ø${x(fin.D)} × ${x(fin.L)} mm`
+        case 'cuadrada': return `${x(fin.A)} × ${x(fin.A)} × ${x(fin.L)} mm`
+        case 'hexagonal': case 'octogonal': return `${x(fin.S)} entre caras × ${x(fin.L)} mm`
+        case 'pletina': return `${x(fin.A)} × ${x(fin.E)} × ${x(fin.L)} mm`
+        case 'tubo': return `Ø${x(fin.D)} × ${x(fin.E)} mm (espesor) × ${x(fin.L)} mm`
+        case 'tubo_rect': return `${x(fin.A)} × ${x(fin.B)} × ${x(fin.E)} mm × ${x(fin.L)} mm`
+        case 'chapa': return `${x(fin.A)} × ${x(fin.B)} × ${x(fin.E)} mm`
+        case 'disco': return `Ø${x(fin.D)} × ${x(fin.E)} mm`
+        case 'anillo': return `Ø${x(fin.D)} / Ø${x(fin.d)} × ${x(fin.E)} mm`
+        case 'angular': case 'perfil_u': case 'perfil_t': return `${x(fin.A)} × ${x(fin.B)} × ${x(fin.E)} mm × ${x(fin.L)} mm`
+        case 'perfil_std': return `${perfil?.serie || ''} ${perfil?.talla || ''} × ${x(fin.L)} mm`
+        case 'esfera': return `Ø${x(fin.D)} mm`
+        default: return ''
     }
-    const peso = String(Math.round(pesoNeto * 1000) / 1000).replace('.', ',')
-    return [nombrePieza || 'Pieza mecanizada', medidas, nombreMaterial, `${peso} kg/ud`].filter(Boolean).join(' · ')
+}
+
+/**
+ * Descripción de línea de presupuesto en varias líneas, clara y profesional:
+ *   Eje mecanizado
+ *   Barra redonda Ø40 × 120 mm
+ *   Material: Acero C45 (F-1140 / F-114) · EN 10083 · 1.0503
+ *   Peso aprox.: 1,184 kg/ud
+ */
+export function descripcionPieza(nombrePieza: string, forma: FormaId, fin: Record<string, number>, nombreMaterial: string, pesoNeto: number, perfil?: { serie: string; talla: string }, extra?: { norma?: string; incluirPeso?: boolean; detalles?: string[] }): string {
+    const lineas: string[] = [nombrePieza?.trim() || 'Pieza mecanizada']
+    const medidas = medidasTexto(forma, fin, perfil)
+    if (medidas) lineas.push(`${NOMBRE_FORMA[forma] || ''} ${medidas}`.trim())
+    lineas.push(`Material: ${nombreMaterial}${extra?.norma ? ` · ${extra.norma}` : ''}`)
+    for (const d of extra?.detalles || []) if (d) lineas.push(d)
+    if (extra?.incluirPeso !== false && pesoNeto > 0) lineas.push(`Peso aprox.: ${pesoNeto.toLocaleString('es-ES', { maximumFractionDigits: 3 })} kg/ud`)
+    return lineas.join('\n')
 }

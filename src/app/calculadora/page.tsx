@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Calculator, TrendingUp, TrendingDown, RefreshCw, Plus, Trash2, Wand2, FileText, Package, Save, Copy, Loader2, Info, Scale, Settings2, History, Minus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -66,6 +67,8 @@ export default function CalculadoraPage() {
     const [iva, setIva] = useState('21')
 
     const [dialogo, setDialogo] = useState<null | 'presupuesto'>(null)
+    const [incluirPeso, setIncluirPeso] = useState(true)
+    const [descManual, setDescManual] = useState<string | null>(null)
     const [clienteId, setClienteId] = useState('')
     const [guardando, setGuardando] = useState(false)
 
@@ -113,7 +116,11 @@ export default function CalculadoraPage() {
     const r = useMemo(() => calcular(entrada), [entrada])
     const escalado = useMemo(() => CANTIDADES.map(c => ({ c, r: calcular({ ...entrada, cantidad: c }) })), [entrada])
     const f = formaPorId(forma)
-    const descripcion = descripcionPieza(nombre, forma, final, material.nombre, r.pesoNeto, forma === 'perfil_std' ? perfil : undefined)
+    const detallesDesc = [
+        tratamientos.length ? `Tratamiento: ${tratamientos.map(t => t.nombre).join(', ')}` : '',
+    ]
+    const descripcionAuto = descripcionPieza(nombre, forma, final, material.nombre, r.pesoNeto, forma === 'perfil_std' ? perfil : undefined, { norma: material.norma, incluirPeso, detalles: detallesDesc })
+    const descripcion = descManual ?? descripcionAuto
     const totalConIva = r.precioLote * (1 + num(iva) / 100)
 
     const cambiarForma = (id: FormaId) => {
@@ -159,6 +166,7 @@ export default function CalculadoraPage() {
         setCantidad(String(e.cantidad || 1)); setKerf(String(e.kerf ?? 3)); setLargoBarra(String(e.largoBarra ?? 0)); setMerma(String(e.merma ?? 0))
         setViruta(!!e.descontarViruta); setOperaciones(e.operaciones || []); setTratamientos(e.tratamientos || []); setOtros(String(e.otrosLote ?? 0)); setMargen(String(e.margen ?? 30))
         setPrecioManual(String(e.precioKg ?? ''))
+        setDescManual(null)
         toast.success(`Cálculo «${h.nombre}» cargado`)
     }
 
@@ -395,9 +403,16 @@ export default function CalculadoraPage() {
                                     {datos?.puedePresupuestar && <Button onClick={() => setDialogo('presupuesto')} className="font-bold"><FileText className="h-4 w-4 mr-1" /> Crear presupuesto</Button>}
                                     <Button variant="outline" onClick={() => guardar('catalogo')} disabled={guardando}><Package className="h-4 w-4 mr-1" /> Al catálogo</Button>
                                     <Button variant="outline" onClick={() => guardar('historial')} disabled={guardando}><Save className="h-4 w-4 mr-1" /> Guardar cálculo</Button>
-                                    <Button variant="outline" onClick={() => { navigator.clipboard.writeText(`${descripcion} — ${entrada.cantidad} ud × ${formatCurrency(r.precioUnidad)}`); toast.success('Línea copiada') }}><Copy className="h-4 w-4 mr-1" /> Copiar línea</Button>
+                                    <Button variant="outline" onClick={() => { navigator.clipboard.writeText(`${descripcion}\n${entrada.cantidad} ud × ${formatCurrency(r.precioUnidad)}`); toast.success('Línea copiada') }}><Copy className="h-4 w-4 mr-1" /> Copiar línea</Button>
                                 </div>
-                                <p className="text-[11px] text-muted-foreground">Línea: {descripcion}</p>
+                                <div>
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-xs text-muted-foreground">Descripción para el presupuesto</Label>
+                                        {descManual !== null && <button className="text-[11px] font-semibold text-primary" onClick={() => setDescManual(null)}>Restablecer automática</button>}
+                                    </div>
+                                    <Textarea value={descripcion} onChange={e => setDescManual(e.target.value)} rows={5} className="mt-1 text-sm leading-relaxed" />
+                                    <label className="flex items-center gap-2 text-xs mt-1.5 text-muted-foreground"><Switch checked={incluirPeso} onCheckedChange={v => { setIncluirPeso(v); }} /> Incluir el peso en la descripción</label>
+                                </div>
                             </div>
 
                             <div className="rounded-2xl border bg-card p-4">
@@ -448,13 +463,17 @@ export default function CalculadoraPage() {
                     </DialogHeader>
                     <div className="space-y-3">
                         <div><Label className="text-xs">Cliente</Label><div className="mt-1"><ClientCombobox value={clienteId} onChange={v => setClienteId(v)} /></div></div>
+                        <div>
+                            <Label className="text-xs">Descripción de la línea (puedes cambiarla)</Label>
+                            <Textarea value={descripcion} onChange={e => setDescManual(e.target.value)} rows={6} className="mt-1 text-sm leading-relaxed" />
+                            {descManual !== null && <button className="text-[11px] font-semibold text-primary mt-1" onClick={() => setDescManual(null)}>Restablecer descripción automática</button>}
+                        </div>
                         <div className="rounded-lg bg-muted p-3 text-sm">
-                            <p className="font-semibold">{descripcion}</p>
                             <p className="mt-1">{entrada.cantidad} ud × {formatCurrency(r.precioUnidad)} = <b>{formatCurrency(r.precioLote)}</b> + IVA {iva}% = <b>{formatCurrency(totalConIva)}</b></p>
                         </div>
                         <div className="flex justify-end gap-2">
                             <Button variant="outline" onClick={() => setDialogo(null)}>Cancelar</Button>
-                            <Button onClick={() => guardar('presupuesto')} disabled={guardando || !clienteId}>{guardando && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Crear presupuesto</Button>
+                            <Button onClick={() => guardar('presupuesto')} disabled={guardando || !clienteId || !descripcion.trim()}>{guardando && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Crear presupuesto</Button>
                         </div>
                     </div>
                 </DialogContent>

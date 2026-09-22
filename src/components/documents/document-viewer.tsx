@@ -96,7 +96,7 @@ export function DocumentViewer({ document: doc, type }: DocumentViewerProps) {
                     <tbody>
                         {lines.map((line: any, i: number) => (
                             <tr key={i} className="border-b border-slate-50">
-                                <td className="py-3 pr-4 text-slate-700">{line.descripcion}</td>
+                                <td className="py-3 pr-4 text-slate-700 whitespace-pre-line">{line.descripcion}</td>
                                 <td className="py-3 text-right text-slate-600 font-mono">{line.cantidad || 1}</td>
                                 <td className="py-3 text-right text-slate-600 font-mono">{formatCurrency(line.precio_unitario || 0)}</td>
                                 <td className="py-3 text-right text-slate-800 font-bold font-mono">{formatCurrency(line.importe || 0)}</td>
