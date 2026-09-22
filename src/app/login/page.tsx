@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [marca, setMarca] = useState<{ nombre: string; logo: string | null; color: string | null; bienvenida: string | null } | null>(null)
+
+  useEffect(() => {
+    fetch('/api/marca').then(r => r.json()).then(m => {
+      setMarca(m)
+      if (m?.color && /^#[0-9a-f]{6}$/i.test(m.color)) document.documentElement.style.setProperty('--primary', m.color)
+    }).catch(() => { })
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -46,18 +54,22 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="glass rounded-3xl border border-white/50 shadow-2xl shadow-slate-200/20 p-8 md:p-10">
           <div className="flex flex-col items-center text-center mb-8">
-            <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center text-white shadow-lg mb-4">
-              <span className="text-xl font-black">X</span>
-            </div>
+            {marca?.logo ? (
+              <img src={marca.logo} alt={marca.nombre} className="h-20 max-w-[220px] object-contain mb-4" />
+            ) : (
+              <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center text-white shadow-lg mb-4">
+                <span className="text-xl font-black">{(marca?.nombre || 'X').slice(0, 1)}</span>
+              </div>
+            )}
             <div className="h-6 w-1 bg-primary rounded-full mb-3" />
             <span className="text-[10px] font-extrabold text-primary uppercase tracking-[0.3em]">
               ACCESO
             </span>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 mt-2">
-              Empresa <span className="text-primary">X</span>
+              {marca?.nombre || <>Empresa <span className="text-primary">X</span></>}
             </h1>
             <p className="text-slate-500 font-medium text-sm mt-1">
-              Inicia sesión para continuar
+              {marca?.bienvenida || 'Inicia sesión para continuar'}
             </p>
           </div>
 

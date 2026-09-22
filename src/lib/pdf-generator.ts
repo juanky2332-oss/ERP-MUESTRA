@@ -2,42 +2,88 @@
   import autoTable from 'jspdf-autotable'
   import { format } from 'date-fns'
   import { es } from 'date-fns/locale'
+  import { MARCA_POR_DEFECTO, hexARgb, suavizar, formatoImagen, type MarcaDocumento } from '@/lib/documentos/marca'
 
-  export const generatePDF = async (doc: any, type: 'presupuesto' | 'albaran' | 'factura', mode: 'preview' | 'download' | 'blob' | 'arraybuffer' = 'download', opts: { logoDataUrl?: string | null } = {}) => {
+  type OpcionesPDF = { logoDataUrl?: string | null; marca?: MarcaDocumento | null }
+
+  /** Marca a usar: la que se pasa (servidor) o la de la empresa del usuario (navegador). */
+  async function resolverMarca(opts: OpcionesPDF): Promise<MarcaDocumento> {
+      if (opts.marca) return opts.marca
+      if (typeof window !== 'undefined') {
+          try {
+              const { cargarMarcaCliente } = await import('@/lib/documentos/marca-cliente')
+              return await cargarMarcaCliente()
+          } catch (e) {
+              console.warn('No se pudo cargar la marca de la empresa', e)
+          }
+      }
+      return { ...MARCA_POR_DEFECTO, logoDataUrl: opts.logoDataUrl ?? null }
+  }
+
+  /** Cabecera común: franja de color, logo (manteniendo proporción) y datos de la empresa. */
+  function pintarCabecera(pdf: jsPDF, marca: MarcaDocumento) {
+      const color = hexARgb(marca.color)
+      pdf.setFillColor(...color)
+      pdf.rect(0, 0, 210, 3, 'F')
+      const logo = marca.logoDataUrl
+      if (logo) {
+          try {
+              const props = (pdf as any).getImageProperties(logo)
+              const maxW = 45, maxH = 24
+              const escala = Math.min(maxW / props.width, maxH / props.height)
+              pdf.addImage(logo, formatoImagen(logo), 15, 14, props.width * escala, props.height * escala, 'logo-empresa', 'FAST')
+          } catch (e) {
+              console.warn('Logo no válido para el PDF', e)
+          }
+      }
+      pdf.setTextColor(0, 0, 0)
+      pdf.setFontSize(10)
+      pdf.setFont('helvetica', 'bold')
+      pdf.text(marca.nombre || '', 15, 55)
+      pdf.setFontSize(8)
+      pdf.setTextColor(80, 80, 80)
+      pdf.setFont('helvetica', 'normal')
+      let y = 60
+      const linea = (t?: string | null) => { if (t) { pdf.text(pdf.splitTextToSize(t, 85), 15, y); y += 4 * pdf.splitTextToSize(t, 85).length } }
+      linea(marca.nif ? `NIF: ${marca.nif}` : null)
+      linea(marca.direccion)
+      linea(marca.email ? `Email: ${marca.email}` : null)
+      linea(marca.telefono ? `Tel: ${marca.telefono}` : null)
+      linea(marca.web)
+  }
+
+  /** Pie personalizable en todas las páginas. */
+  function pintarPie(pdf: jsPDF, marca: MarcaDocumento) {
+      if (!marca.pie) return
+      const paginas = (pdf as any).getNumberOfPages()
+      for (let i = 1; i <= paginas; i++) {
+          pdf.setPage(i)
+          pdf.setFontSize(7)
+          pdf.setTextColor(120, 120, 120)
+          pdf.setFont('helvetica', 'normal')
+          const lineas = pdf.splitTextToSize(marca.pie, 180)
+          pdf.text(lineas, 105, 292 - (lineas.length - 1) * 3, { align: 'center' })
+      }
+      pdf.setTextColor(0, 0, 0)
+  }
+
+  export const generatePDF = async (doc: any, type: 'presupuesto' | 'albaran' | 'factura', mode: 'preview' | 'download' | 'blob' | 'arraybuffer' = 'download', opts: OpcionesPDF = {}) => {
       const docTitle = type === 'presupuesto' ? 'PRESUPUESTO' : type === 'albaran' ? 'ALBARÁN' : 'FACTURA'
 
       const jsPDFInstance = new jsPDF()
 
-      // 1. Logo
-      try {
-          const logo = opts.logoDataUrl ?? (await getImageData('/icon-512.png'))?.data
-          if (logo) {
-              jsPDFInstance.addImage(logo, 'PNG', 15, 15, 22, 22)
-          }
-      } catch (e) {
-          console.warn('Logo not loaded', e)
-      }
-
-      // 2. Company Info (Upper Left)
-      jsPDFInstance.setFontSize(10)
-      jsPDFInstance.setFont('helvetica', 'bold')
-      jsPDFInstance.text('EMPRESA X, S.L.', 15, 55)
-
-      jsPDFInstance.setFontSize(8)
-      jsPDFInstance.setTextColor(80, 80, 80)
-      jsPDFInstance.setFont('helvetica', 'normal')
-      jsPDFInstance.text('NIF: B00000000', 15, 60)
-      jsPDFInstance.text('Calle Ejemplo, 1', 15, 64)
-      jsPDFInstance.text('30000 - Ciudad Ejemplo (Murcia)', 15, 68)
-      jsPDFInstance.text('Email: administracion@empresax-demo.com', 15, 72)
-      jsPDFInstance.text('Tel: 600 000 000', 15, 76)
+      // 1-2. Marca de la empresa (logo, datos y color)
+      const marca = await resolverMarca(opts)
+      const colorMarca = hexARgb(marca.color)
+      pintarCabecera(jsPDFInstance, marca)
 
       // 3. Document info box (Upper Right)
       const rightAlignX = 195
-      jsPDFInstance.setTextColor(0, 0, 0)
+      jsPDFInstance.setTextColor(...colorMarca)
       jsPDFInstance.setFontSize(24)
       jsPDFInstance.setFont('helvetica', 'bold')
       jsPDFInstance.text(docTitle, rightAlignX, 30, { align: 'right' })
+      jsPDFInstance.setTextColor(0, 0, 0)
 
       jsPDFInstance.setFontSize(10)
       jsPDFInstance.setFont('helvetica', 'normal')
@@ -165,7 +211,7 @@
       jsPDFInstance.line(xTotal, startY, xTotal, mainBoxBottomY)
 
       // Table Header Background
-      jsPDFInstance.setFillColor(245, 245, 245)
+      jsPDFInstance.setFillColor(...suavizar(colorMarca))
       jsPDFInstance.rect(marginX, startY, tableWidth, 10, 'F')
       jsPDFInstance.setDrawColor(0)
       jsPDFInstance.line(marginX, startY + 10, marginX + tableWidth, startY + 10)
@@ -230,7 +276,7 @@
           jsPDFInstance.setDrawColor(200)
           jsPDFInstance.rect(footerX, footerY, footerWidth, 8)
           jsPDFInstance.setFont('helvetica', isTotal ? 'bold' : 'normal')
-          if (isTotal) jsPDFInstance.setFillColor(245, 245, 245), jsPDFInstance.rect(footerX, footerY, footerWidth, 8, 'F')
+          if (isTotal) jsPDFInstance.setFillColor(...suavizar(colorMarca, 0.8)), jsPDFInstance.rect(footerX, footerY, footerWidth, 8, 'F')
 
           jsPDFInstance.setFontSize(8)
           jsPDFInstance.text(label, footerX + 2, footerY + 5.5)
@@ -250,8 +296,21 @@
           jsPDFInstance.setFont('helvetica', 'normal')
           const lineasPago = jsPDFInstance.splitTextToSize(String(doc.forma_pago || doc.metodo_pago), 115)
           jsPDFInstance.text(lineasPago, marginX, totalsBoxY + 10)
-          if (doc.iban) jsPDFInstance.text(`IBAN: ${doc.iban}`, marginX, totalsBoxY + 10 + lineasPago.length * 4)
+          const iban = doc.iban || (marca.mostrarIban ? marca.iban : null)
+          if (iban) jsPDFInstance.text(`IBAN: ${iban}`, marginX, totalsBoxY + 10 + lineasPago.length * 4)
+      } else if (type === 'factura' && marca.mostrarIban && marca.iban) {
+          jsPDFInstance.setFontSize(8)
+          jsPDFInstance.text(`IBAN: ${marca.iban}`, marginX, totalsBoxY + 5)
       }
+
+      if (type === 'factura' && marca.textoFactura) {
+          jsPDFInstance.setFontSize(7)
+          jsPDFInstance.setTextColor(90, 90, 90)
+          jsPDFInstance.text(jsPDFInstance.splitTextToSize(marca.textoFactura, 115), marginX, totalsBoxY + 22)
+          jsPDFInstance.setTextColor(0, 0, 0)
+      }
+
+      pintarPie(jsPDFInstance, marca)
 
       if (mode === 'preview') {
           const blob = jsPDFInstance.output('bloburl')
@@ -265,29 +324,10 @@
       }
   }
 
-  export const generateGastoPDF = async (gasto: any, mode: 'preview' | 'download' | 'blob' = 'download') => {
+  export const generateGastoPDF = async (gasto: any, mode: 'preview' | 'download' | 'blob' = 'download', opts: OpcionesPDF = {}) => {
       const jsPDFInstance = new jsPDF()
-
-      try {
-          const imgProps = await getImageData('/icon-512.png')
-          if (imgProps) {
-              jsPDFInstance.addImage(imgProps.data, 'PNG', 15, 15, 22, 22)
-          }
-      } catch (e) {
-          console.warn('Logo not loaded', e)
-      }
-
-      jsPDFInstance.setFontSize(10)
-      jsPDFInstance.setFont('helvetica', 'bold')
-      jsPDFInstance.text('EMPRESA X, S.L.', 15, 55)
-      jsPDFInstance.setFontSize(8)
-      jsPDFInstance.setTextColor(80, 80, 80)
-      jsPDFInstance.setFont('helvetica', 'normal')
-      jsPDFInstance.text('NIF: B00000000', 15, 60)
-      jsPDFInstance.text('Calle Ejemplo, 1', 15, 64)
-      jsPDFInstance.text('30000 - Ciudad Ejemplo (Murcia)', 15, 68)
-      jsPDFInstance.text('Email: administracion@empresax-demo.com', 15, 72)
-      jsPDFInstance.text('Tel: 600 000 000', 15, 76)
+      const marca = await resolverMarca(opts)
+      pintarCabecera(jsPDFInstance, marca)
 
       const rightAlignX = 195
       jsPDFInstance.setTextColor(0, 0, 0)

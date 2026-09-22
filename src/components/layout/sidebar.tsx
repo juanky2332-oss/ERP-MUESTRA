@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
+import { useEmpresa } from '@/hooks/use-empresa'
 
 interface NavItem {
     href: string
@@ -61,19 +62,24 @@ interface SidebarContentProps {
 
 // 2. EXTRAEMOS EL COMPONENTE SidebarContent PARA QUE ESTÉ FUERA DE Sidebar()
 export function SidebarContent({ collapsed, pathname, onNavigate }: SidebarContentProps) {
+    const { data: empresa } = useEmpresa()
+    const nombre = empresa?.nombre_comercial || empresa?.nombre || 'Empresa X'
     return (
         <div className="flex flex-col h-full">
             {/* Logo Area (Modernized) */}
             <div className="h-20 flex items-center px-6 shrink-0">
-                <div className="flex items-center gap-3">
-                    {!collapsed && (
-                        <div className="flex flex-col animate-in fade-in slide-in-from-left-2 duration-500">
-                            <h1 className="text-[12px] font-black text-white leading-tight tracking-tight uppercase opacity-90">
-                                Empresa<br />X
-                            </h1>
-                        </div>
+                <Link href="/" onClick={onNavigate} className="flex items-center gap-3 min-w-0">
+                    {empresa?.logo_app_url ? (
+                        <img src={empresa.logo_app_url} alt={nombre} className="h-10 w-10 rounded-xl object-contain bg-white/95 p-1 shrink-0" />
+                    ) : (
+                        <div className="h-10 w-10 rounded-xl bg-sidebar-primary/20 text-white flex items-center justify-center font-black shrink-0">{nombre.slice(0, 1)}</div>
                     )}
-                </div>
+                    {!collapsed && (
+                        <h1 className="text-[13px] font-black text-white leading-tight tracking-tight uppercase opacity-90 line-clamp-2 animate-in fade-in slide-in-from-left-2 duration-300">
+                            {nombre}
+                        </h1>
+                    )}
+                </Link>
             </div>
 
             {/* Navigation (Linear Style) */}

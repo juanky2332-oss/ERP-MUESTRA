@@ -20,6 +20,7 @@ type Message = {
 
 const ETIQUETA_CONFIRMAR: Record<string, string> = {
     email_documento: 'Enviar correo',
+    email_libre: 'Enviar correo',
     reclamacion: 'Enviar reclamación',
     cobro: 'Confirmar cobro',
     gasto: 'Guardar gasto',
@@ -29,7 +30,7 @@ const ETIQUETA_CONFIRMAR: Record<string, string> = {
 export function ChatWidget() {
     const [isOpen, setIsOpen] = useState(false)
     const [messages, setMessages] = useState<Message[]>([
-        { role: 'assistant', content: 'Hola, soy ARIA. ¿En qué puedo ayudarte hoy?' }
+        { role: 'assistant', content: '¡Hola! Soy El Maikel. Pregúntame cualquier duda del ERP o dime qué necesitas: facturas, cobros, correos, gastos, presupuestos, cálculo de piezas… Te echo una mano con todo lo que pueda.' }
     ])
     const [input, setInput] = useState("")
     const [isLoading, setIsLoading] = useState(false)
@@ -231,7 +232,7 @@ export function ChatWidget() {
                     className="h-14 w-14 md:h-16 md:w-16 rounded-full shadow-2xl bg-white hover:bg-gray-50 border-4 border-[#1E88E5]/20 p-0 relative group transition-all duration-500 hover:scale-110 active:scale-95 pointer-events-auto"
                 >
                     <div className="absolute inset-0 rounded-full overflow-hidden p-1.5 bg-gradient-to-br from-[#4338ca] to-[#6366f1] flex items-center justify-center group-hover:rotate-12 transition-transform duration-500">
-                        <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" aria-label="ARIA">
+                        <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" aria-label="El Maikel">
                             <rect x="4" y="8" width="16" height="12" rx="4" fill="white" />
                             <rect x="10.5" y="2" width="3" height="5" rx="1.5" fill="white" />
                             <circle cx="12" cy="3.2" r="1.6" fill="white" />
@@ -256,7 +257,7 @@ export function ChatWidget() {
                 <CardHeader className="bg-gradient-to-r from-[#1E88E5]/10 to-[#1E88E5]/5 p-4 sm:p-5 flex flex-row justify-between items-center border-b border-gray-100">
                     <div className="flex items-center gap-4">
                         <div className="h-12 w-12 relative drop-shadow-md rounded-full overflow-hidden bg-gradient-to-br from-[#4338ca] to-[#6366f1] flex items-center justify-center">
-                            <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8" aria-label="ARIA">
+                            <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8" aria-label="El Maikel">
                                 <rect x="4" y="8" width="16" height="12" rx="4" fill="white" />
                                 <rect x="10.5" y="2" width="3" height="5" rx="1.5" fill="white" />
                                 <circle cx="12" cy="3.2" r="1.6" fill="white" />
@@ -266,7 +267,7 @@ export function ChatWidget() {
                             </svg>
                         </div>
                         <div className="flex flex-col">
-                            <h3 className="font-extrabold text-gray-800 tracking-tight">ARIA</h3>
+                            <h3 className="font-extrabold text-gray-800 tracking-tight">El Maikel</h3>
                             <p className="text-[10px] text-[#1E88E5] font-bold uppercase tracking-widest flex items-center gap-1.5">
                                 <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
                                 Asistente del ERP

@@ -3,6 +3,7 @@ import type { Contexto } from '@/lib/auth'
 import { assertPermiso } from '@/lib/auth'
 import { generatePDF } from '@/lib/pdf-generator'
 import { LOGO_DATA_URL } from '@/lib/documentos/logo-data'
+import { marcaDesdeEmpresa, type MarcaDocumento } from '@/lib/documentos/marca'
 import { enviarCorreo, getEmpresa, registrarEnvio } from '@/lib/email/mailer'
 import { auditar } from '@/lib/auditoria'
 
@@ -93,9 +94,28 @@ export async function emailsDeCliente(ctx: Contexto, clienteId?: string | null, 
     return emails
 }
 
-/** PDF del documento como Buffer (mismo diseño que la descarga desde la web). */
-export async function pdfDeDocumento(doc: any, tipo: TipoDocumento): Promise<Buffer> {
-    const ab = await generatePDF(doc, tipo, 'arraybuffer', { logoDataUrl: LOGO_DATA_URL })
+/** Marca de la empresa (logo en base64, datos, color, textos) para PDFs generados en servidor. */
+export async function marcaServidor(ctx: Pick<Contexto, 'supabase' | 'empresaId'>): Promise<MarcaDocumento> {
+    const { data: e } = await ctx.supabase.from('empresas').select('*').eq('id', ctx.empresaId).maybeSingle()
+    let logo: string | null = null
+    if (e?.logo_documentos_url) {
+        try {
+            const res = await fetch(e.logo_documentos_url)
+            if (res.ok) {
+                const tipo = res.headers.get('content-type') || 'image/png'
+                logo = `data:${tipo};base64,${Buffer.from(await res.arrayBuffer()).toString('base64')}`
+            }
+        } catch (err) {
+            console.warn('No se pudo descargar el logo de documentos', err)
+        }
+    }
+    return marcaDesdeEmpresa(e, logo || LOGO_DATA_URL)
+}
+
+/** PDF del documento como Buffer (mismo diseño que la descarga desde la web, con la marca de la empresa). */
+export async function pdfDeDocumento(doc: any, tipo: TipoDocumento, ctx: Pick<Contexto, 'supabase' | 'empresaId'>): Promise<Buffer> {
+    const marca = await marcaServidor(ctx)
+    const ab = await generatePDF(doc, tipo, 'arraybuffer', { marca })
     return Buffer.from(ab as ArrayBuffer)
 }
 
@@ -133,7 +153,7 @@ export async function enviarDocumentoPorCorreo(ctx: Contexto, params: {
     if (error || !doc) throw new Error('No se encuentra el documento.')
 
     const empresa = await getEmpresa(ctx)
-    const pdf = await pdfDeDocumento(doc, params.tipo)
+    const pdf = await pdfDeDocumento(doc, params.tipo, ctx)
 
     const res = await enviarCorreo({
         to: params.destinatarios,

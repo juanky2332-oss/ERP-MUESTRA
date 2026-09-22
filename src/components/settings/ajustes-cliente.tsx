@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { cn, formatCurrency } from '@/lib/utils'
 import { ROLES, etiquetaRol, type Rol } from '@/lib/permisos'
 import { guardarEmpresa, cambiarRolUsuario, invitarUsuario, guardarMiPerfil } from '@/actions/ajustes'
+import { MarcaAjustes } from '@/components/settings/marca-ajustes'
 
 const VARIABLES = ['{numero_factura}', '{nombre_cliente}', '{importe_pendiente}', '{importe_total}', '{fecha_vencimiento}', '{fecha_factura}', '{dias_retraso}', '{nombre_empresa}']
 
@@ -70,6 +71,7 @@ export function AjustesCliente({ datos, telegram }: { datos: any; telegram: Reac
         <Tabs defaultValue="empresa">
             <TabsList className="flex flex-wrap h-auto">
                 <TabsTrigger value="empresa">Empresa</TabsTrigger>
+                <TabsTrigger value="marca">Marca y documentos</TabsTrigger>
                 <TabsTrigger value="usuarios">Usuarios</TabsTrigger>
                 <TabsTrigger value="telegram">Telegram</TabsTrigger>
                 <TabsTrigger value="correo">Correo de cobro</TabsTrigger>
@@ -87,14 +89,13 @@ export function AjustesCliente({ datos, telegram }: { datos: any; telegram: Reac
                         <div><Label className="text-xs">Email</Label><Input disabled={!editable} value={emp.email || ''} onChange={e => set('email', e.target.value)} className="mt-1" /></div>
                         <div><Label className="text-xs">IBAN (para facturas)</Label><Input disabled={!editable} value={emp.iban || ''} onChange={e => set('iban', e.target.value)} className="mt-1" /></div>
                         <div className="sm:col-span-2"><Label className="text-xs">Dirección</Label><Input disabled={!editable} value={emp.direccion || ''} onChange={e => set('direccion', e.target.value)} className="mt-1" /></div>
-                        <div><Label className="text-xs">URL del logo</Label><Input disabled={!editable} value={emp.logo_url || ''} onChange={e => set('logo_url', e.target.value)} placeholder="https://…" className="mt-1" /></div>
-                        <div>
-                            <Label className="text-xs">Color principal</Label>
-                            <div className="flex gap-2 mt-1"><input type="color" disabled={!editable} value={emp.color_principal || '#4f46e5'} onChange={e => set('color_principal', e.target.value)} className="h-9 w-12 rounded border" /><Input disabled={!editable} value={emp.color_principal || ''} onChange={e => set('color_principal', e.target.value)} /></div>
-                        </div>
                     </div>
-                    {editable && <Button onClick={() => guardar(['nombre', 'nif', 'telefono', 'email', 'iban', 'direccion', 'logo_url', 'color_principal'])} disabled={guardando}>{guardando && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Guardar datos</Button>}
+                    {editable && <Button onClick={() => guardar(['nombre', 'nif', 'telefono', 'email', 'iban', 'direccion'])} disabled={guardando}>{guardando && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Guardar datos</Button>}
                 </Seccion>
+            </TabsContent>
+
+            <TabsContent value="marca" className="pt-4">
+                <MarcaAjustes empresa={datos.empresa} editable={editable} />
             </TabsContent>
 
             <TabsContent value="usuarios" className="pt-4 space-y-4">

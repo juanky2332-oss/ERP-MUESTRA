@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { AvisoCobros } from '@/components/cobros/aviso-cobros'
+import { useEmpresa, useColorEmpresa } from '@/hooks/use-empresa'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
@@ -32,7 +33,9 @@ import { QuickCreateMenu } from '@/components/layout/quick-create-menu'
 export function AppShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname()
     const router = useRouter()
-    const { theme, setTheme } = useTheme()
+    const { theme, setTheme, resolvedTheme } = useTheme()
+    const { data: empresa } = useEmpresa()
+    useColorEmpresa(empresa?.color_principal, resolvedTheme === 'dark')
 
     // Global Search State
     const [searchQuery, setSearchQuery] = useState('')
@@ -98,7 +101,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                 />
                             </SheetContent>
                         </Sheet>
-                        <span className="font-extrabold text-sm tracking-tighter">EMPRESA X</span>
+                        {empresa?.logo_app_url && <img src={empresa.logo_app_url} alt="" className="h-7 w-7 rounded-lg object-contain" />}
+                        <span className="font-extrabold text-sm tracking-tighter uppercase truncate max-w-[150px]">{empresa?.nombre_comercial || empresa?.nombre || 'Empresa X'}</span>
                     </div>
 
                     {/* Sophisticated Search Bar (Command Palette Style) */}

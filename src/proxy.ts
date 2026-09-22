@@ -13,6 +13,6 @@ export const config = {
     // recibiría la respuesta 200 que espera.
     // /api/cron se autentica con CRON_SECRET, y el manifest de la PWA debe
     // servirse sin sesión (si no, el navegador recibe el HTML del login).
-    '/((?!_next/static|_next/image|favicon.ico|api/telegram|api/cron|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/telegram|api/cron|api/marca|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 }

@@ -23,6 +23,7 @@ import { ImportDocumentDialog } from './import-dialog'
 import { DocumentPreviewModal } from './document-preview-modal'
 import { CatalogoPicker } from '@/components/catalogo/catalogo-picker'
 import { previsualizarVencimiento } from '@/actions/documents'
+import { useEmpresa } from '@/hooks/use-empresa'
 
 // Schema
 const lineItemSchema = z.object({
@@ -114,6 +115,14 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
         })
         return () => { cancel = true }
     }, [type, clienteIdWatch, fechaWatch, vencimientoManual])
+
+    // Presupuestos nuevos: condiciones por defecto de la empresa en observaciones.
+    const { data: empresaActual } = useEmpresa()
+    useEffect(() => {
+        if (type === 'presupuesto' && !initialData?.observaciones && empresaActual?.condiciones_presupuesto && !form.getValues('observaciones')) {
+            form.setValue('observaciones', empresaActual.condiciones_presupuesto)
+        }
+    }, [type, empresaActual?.condiciones_presupuesto])
 
     const { fields, append, remove } = useFieldArray({
         control: form.control,

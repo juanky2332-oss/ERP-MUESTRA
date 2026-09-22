@@ -8,11 +8,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types src/lib/cobros/vencimientos.test.ts",
+    "test": "node --test --experimental-strip-types src/lib/cobros/vencimientos.test.ts src/lib/calculadora/calculo.test.ts",
     "test:seguridad": "node scripts/pruebas/test_seguridad.js",
     "test:app": "node scripts/pruebas/test_app.js",
     "test:telegram": "node scripts/pruebas/test_telegram.js",
-    "test:ui": "node scripts/pruebas/test_ui.js"
+    "test:ui": "node scripts/pruebas/test_ui.js",
+    "test:calculadora": "node scripts/pruebas/test_calculadora_marca.js",
+    "test:correo": "node scripts/pruebas/test_correo_libre.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

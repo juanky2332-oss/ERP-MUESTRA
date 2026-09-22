@@ -36,7 +36,7 @@ export async function getAjustes() {
     }
 }
 
-const CAMPOS_EMPRESA = ['nombre', 'nif', 'email', 'telefono', 'direccion', 'logo_url', 'color_principal', 'iban', 'plantilla_reclamacion_asunto', 'plantilla_reclamacion_cuerpo', 'ia_activa', 'ia_limite_mensual'] as const
+const CAMPOS_EMPRESA = ['nombre', 'nombre_comercial', 'nif', 'email', 'telefono', 'direccion', 'web', 'color_principal', 'color_documentos', 'iban', 'mostrar_iban_factura', 'pie_documentos', 'texto_factura', 'condiciones_presupuesto', 'mensaje_bienvenida', 'plantilla_reclamacion_asunto', 'plantilla_reclamacion_cuerpo', 'ia_activa', 'ia_limite_mensual'] as const
 
 export async function guardarEmpresa(datos: any) {
     try {
@@ -44,7 +44,7 @@ export async function guardarEmpresa(datos: any) {
         const payload: any = {}
         for (const k of CAMPOS_EMPRESA) if (k in datos) payload[k] = typeof datos[k] === 'string' ? datos[k].trim() : datos[k]
         if ('ia_limite_mensual' in payload) payload.ia_limite_mensual = Math.max(0, Number(payload.ia_limite_mensual) || 0)
-        if (payload.color_principal && !/^#[0-9a-f]{6}$/i.test(payload.color_principal)) throw new Error('Color no válido (usa formato #RRGGBB).')
+        for (const c of ['color_principal', 'color_documentos']) if (payload[c] && !/^#[0-9a-f]{6}$/i.test(payload[c])) throw new Error('Color no válido (usa formato #RRGGBB).')
         const { error } = await ctx.supabase.from('empresas').update(payload).eq('id', ctx.empresaId)
         if (error) throw error
         await auditar(ctx, 'empresa_editada', { tipo: 'empresa', id: ctx.empresaId }, payload)
@@ -129,6 +129,66 @@ export async function invitarUsuario(datos: { email: string; nombre: string; rol
         await auditar(ctx, 'usuario_invitado', { tipo: 'usuario', id: creado.user.id, ref: email }, { rol: datos.rol, correo_enviado: enviado })
         revalidatePath('/ajustes')
         return { success: true as const, passwordTemporal: pass, correoEnviado: enviado }
+    } catch (e) {
+        return { success: false as const, error: mensajeError(e) }
+    }
+}
+
+const TIPOS_LOGO: Record<'app' | 'documentos', { columna: string; formatos: string[] }> = {
+    app: { columna: 'logo_app_url', formatos: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'] },
+    // Los PDF solo admiten PNG/JPEG (el navegador convierte la imagen a PNG antes de subirla).
+    documentos: { columna: 'logo_documentos_url', formatos: ['image/png', 'image/jpeg'] },
+}
+
+/**
+ * Cambia el logo de la app (menú y pantalla de acceso) o el de los documentos
+ * (PDF de presupuestos, albaranes y facturas). La interfaz pide confirmación
+ * con vista previa antes de llamar aquí; el cambio queda auditado.
+ */
+export async function subirLogo(formData: FormData) {
+    try {
+        const ctx = await requirePermiso('ajustes')
+        const tipo = formData.get('tipo') as 'app' | 'documentos'
+        const file = formData.get('file') as File | null
+        const cfg = TIPOS_LOGO[tipo]
+        if (!cfg) throw new Error('Tipo de logo no válido')
+        if (!file || file.size === 0) throw new Error('No se ha recibido la imagen.')
+        if (file.size > 2 * 1024 * 1024) throw new Error('La imagen supera 2 MB.')
+        if (!cfg.formatos.includes(file.type)) throw new Error(`Formato no admitido (${file.type || 'desconocido'}). Usa ${cfg.formatos.map(f => f.split('/')[1].toUpperCase()).join(', ')}.`)
+
+        const admin = createAdminClient()
+        const ext = file.type === 'image/svg+xml' ? 'svg' : file.type.split('/')[1].replace('jpeg', 'jpg')
+        const path = `${ctx.empresaId}/${tipo}-${Date.now()}.${ext}`
+        const { error: upErr } = await admin.storage.from('marca').upload(path, Buffer.from(await file.arrayBuffer()), { contentType: file.type, upsert: false })
+        if (upErr) throw new Error('No se pudo subir la imagen: ' + upErr.message)
+        const { data: pub } = admin.storage.from('marca').getPublicUrl(path)
+
+        const { data: antes } = await ctx.supabase.from('empresas').select(cfg.columna).eq('id', ctx.empresaId).single()
+        const update: any = { [cfg.columna]: pub.publicUrl }
+        if (tipo === 'documentos') update.logo_documentos_actualizado_at = new Date().toISOString()
+        const { error } = await ctx.supabase.from('empresas').update(update).eq('id', ctx.empresaId)
+        if (error) throw error
+        await auditar(ctx, tipo === 'app' ? 'logo_app_cambiado' : 'logo_documentos_cambiado', { tipo: 'empresa', id: ctx.empresaId }, { antes: (antes as any)?.[cfg.columna] || null, despues: pub.publicUrl })
+        revalidatePath('/', 'layout')
+        return { success: true as const, url: pub.publicUrl }
+    } catch (e) {
+        return { success: false as const, error: mensajeError(e) }
+    }
+}
+
+/** Vuelve al logo por defecto. */
+export async function quitarLogo(tipo: 'app' | 'documentos') {
+    try {
+        const ctx = await requirePermiso('ajustes')
+        const cfg = TIPOS_LOGO[tipo]
+        if (!cfg) throw new Error('Tipo de logo no válido')
+        const update: any = { [cfg.columna]: null }
+        if (tipo === 'documentos') update.logo_documentos_actualizado_at = new Date().toISOString()
+        const { error } = await ctx.supabase.from('empresas').update(update).eq('id', ctx.empresaId)
+        if (error) throw error
+        await auditar(ctx, `logo_${tipo}_restablecido`, { tipo: 'empresa', id: ctx.empresaId })
+        revalidatePath('/', 'layout')
+        return { success: true as const }
     } catch (e) {
         return { success: false as const, error: mensajeError(e) }
     }

@@ -10,6 +10,9 @@ import { hoyISO, etiquetaMetodo, METODOS_PAGO, offsetMadrid, rangoDiaMadrid } fr
 import { CATEGORIAS_GASTO } from "@/lib/gastos/servidor"
 import { registrarUsoIA, comprobarCupoIA } from "@/lib/ai/uso"
 import { auditar } from "@/lib/auditoria"
+import { MATERIALES, precioConMercado, INDICES_REFERENCIA, type Material } from "@/lib/calculadora/materiales"
+import { calcular, FORMAS, type FormaId } from "@/lib/calculadora/calculo"
+import { obtenerMercado } from "@/lib/calculadora/mercado"
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 const MODELO = process.env.OPENAI_MODEL_CHAT || 'gpt-4o'
@@ -104,6 +107,22 @@ const lecturaTools = [
     },
     {
         type: "function", function: {
+            name: "calcular_pieza",
+            description: "Calcula el PESO de una pieza o barra de cualquier material y forma, y el coste del material al precio de la empresa (ajustado al mercado de hoy). Úsalo para '¿cuánto pesa…?', '¿cuánto cuesta el material de…?'. Medidas en mm.",
+            parameters: {
+                type: "object", properties: {
+                    material: { type: "string", description: "Material como lo diga el usuario: 'acero F-114', 'C45', 'inox 304', 'aluminio 6082', 'latón', 'bronce', 'POM'..." },
+                    forma: { type: "string", enum: FORMAS.map(f => f.id) },
+                    medidas: { type: "object", description: "Claves según la forma: redonda {D,L}; cuadrada {A,L}; hexagonal/octogonal {S,L}; pletina {A,E,L}; tubo {D,E,L}; tubo_rect {A,B,E,L}; chapa {A,B,E}; disco {D,E}; anillo {D,d,E}; angular/perfil_u/perfil_t {A,B,E,L}; esfera {D}; perfil_std {L}; volumen {V en cm³}; peso {P en kg}" },
+                    perfil: { type: "object", properties: { serie: { type: "string", enum: ["IPE", "HEB", "HEA", "UPN"] }, talla: { type: "string" } } },
+                    cantidad: { type: "number" },
+                    sobremedida_mm: { type: "number", description: "Creces en diámetro/sección para el bruto (por defecto 0)" }
+                }, required: ["material", "forma", "medidas"]
+            }
+        }
+    },
+    {
+        type: "function", function: {
             name: "buscar_catalogo",
             description: "Busca productos, materiales o servicios del catálogo (con precio de venta e IVA). Úsalo antes de proponer líneas de presupuesto.",
             parameters: { type: "object", properties: { texto: { type: "string" } }, required: ["texto"] }
@@ -126,6 +145,26 @@ const accionTools = [
                     asunto: { type: "string" },
                     mensaje: { type: "string", description: "Cuerpo del correo en texto plano, sin firma (la firma de la empresa se añade sola). Si el usuario pide un texto concreto, redáctalo aquí." }
                 }, required: ["tipo_documento", "numero"]
+            }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "preparar_correo",
+            description: "Prepara un CORREO a un proveedor, cliente o dirección cualquiera (pedidos, consultas, avisos...). No envía nada hasta que el usuario confirme. POR DEFECTO VA SIN ADJUNTOS: solo rellena 'adjuntar' si el usuario ha pedido EXPRESAMENTE adjuntar un documento concreto.",
+            parameters: {
+                type: "object", properties: {
+                    destinatario: { type: "string", description: "Nombre del proveedor/cliente tal como lo diga el usuario, o un email" },
+                    tipo_destinatario: { type: "string", enum: ["proveedor", "cliente", "otro"] },
+                    cc: { type: "array", items: { type: "string" } },
+                    asunto: { type: "string" },
+                    mensaje: { type: "string", description: "Cuerpo del correo en texto plano, con saludo y despedida, sin firma" },
+                    adjuntar: {
+                        type: "array",
+                        description: "SOLO si el usuario pide adjuntar algo explícitamente. Si no lo pide, NO incluyas este campo.",
+                        items: { type: "object", properties: { tipo_documento: { type: "string", enum: ["factura", "presupuesto", "albaran"] }, numero: { type: "string" } }, required: ["tipo_documento", "numero"] }
+                    }
+                }, required: ["destinatario", "asunto", "mensaje"]
             }
         }
     },
@@ -211,15 +250,17 @@ const accionTools = [
     },
 ]
 
-const SYSTEM_PROMPT = `Eres ARIA, la asistente del ERP de {{EMPRESA}}. Hablas con {{USUARIO}} (rol: {{ROL}}).
+const SYSTEM_PROMPT = `Eres "El Maikel", el asistente del ERP de {{EMPRESA}}: cercano, resolutivo y con ganas de ayudar en todo lo que puedas (dudas de uso del ERP, datos, correos, cobros, gastos, presupuestos, cálculo de piezas y materiales). Si te preguntan quién eres, di que eres El Maikel. Hablas con {{USUARIO}} (rol: {{ROL}}). Tono: profesional pero cercano, de tú.
 
 REGLA 1 — DATOS: ante cualquier pregunta sobre datos, llama primero a la herramienta. Nunca inventes números, fechas, estados, clientes, proveedores, productos, importes ni IVA. Usa los totales que calcula el sistema; no sumes tú.
 
 REGLA 2 — ACCIONES REALES: tú NO puedes enviar correos, registrar cobros, crear gastos ni presupuestos directamente. Para eso tienes herramientas "preparar_*" que dejan la acción lista y la interfaz muestra al usuario un resumen con botones Confirmar / Cancelar.
-- Cuando pidan enviar/mandar un documento por correo → preparar_envio_documento. Si piden un texto concreto (p. ej. "formal, pidiendo que confirmen la recepción"), redáctalo tú en 'mensaje' con tono profesional: saludo formal ('Estimados señores:'), cuerpo claro y despedida ('Un cordial saludo.'), sin firma (la firma de la empresa se añade sola). Usa el número de documento completo (p. ej. FAC-01-2026). Nunca uses marcadores tipo [Tu nombre].
+- Cuando pidan enviar/mandar un DOCUMENTO del ERP (factura, presupuesto, albarán) por correo → preparar_envio_documento.
+- Cuando pidan escribir/mandar un correo a un proveedor, cliente o a cualquiera sin que sea "enviar un documento" → preparar_correo. NO adjuntes nada salvo que el usuario lo pida expresamente ("adjunta", "con la factura X en PDF"...). Ante la duda, sin adjuntos. Si piden un texto concreto (p. ej. "formal, pidiendo que confirmen la recepción"), redáctalo tú en 'mensaje' con tono profesional: saludo formal ('Estimados señores:'), cuerpo claro y despedida ('Un cordial saludo.'), sin firma (la firma de la empresa se añade sola). Usa el número de documento completo (p. ej. FAC-01-2026). Nunca uses marcadores tipo [Tu nombre].
 - "La factura X está pagada" / "han pagado 300 € de la X" → preparar_cobro.
 - "Reclama la factura X" → preparar_reclamacion_pago.
 - Gasto dictado → preparar_gasto (si falta el total o el IVA, pregunta UNA sola cosa).
+- Peso o coste de material de una pieza/barra → calcular_pieza (si el material es ambiguo, di cuál has usado).
 - Presupuesto → previsualizar_presupuesto (busca antes en el catálogo si hay productos).
 Después de preparar, responde en 1-2 frases diciendo qué has preparado y pide confirmación. NO repitas todo el resumen (ya lo ve con los botones). NUNCA digas "procederé a enviarlo", "enviaré" o "ya está enviado" si no has recibido de la herramienta un resultado con ok=true.
 - Si el usuario confirma por texto ("sí", "envíalo", "ok"), llama a confirmar_accion_pendiente y comunica EXACTAMENTE el mensaje que devuelva.
@@ -261,7 +302,7 @@ async function elegirDocumento(ctx: Contexto, tipo: TipoDocumento, numero: strin
     return docs
 }
 
-async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimoUsuario: string, estado: { accion: Accion | null; ejecutada: any }): Promise<any> {
+async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimoUsuario: string, estado: { accion: Accion | null; ejecutada: any }, ultimosUsuario: string[] = [ultimoUsuario]): Promise<any> {
     switch (name) {
         case 'get_cobros_vencimientos': {
             if (!tienePermiso(ctx.rol, 'economico') && !tienePermiso(ctx.rol, 'ver')) return { error: 'Sin permiso' }
@@ -283,6 +324,39 @@ async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimo
             const { data: eventos } = await ctx.supabase.from('eventos').select('titulo, tipo, estado, inicio, fin, todo_el_dia, notas, direccion, cliente_id').gte('inicio', rangoDiaMadrid(args.desde).desde).lte('inicio', rangoDiaMadrid(args.hasta).hasta).order('inicio')
             const { data: venc } = await ctx.supabase.from('facturas').select('numero, cliente_razon_social, fecha_vencimiento, total, importe_cobrado').gte('fecha_vencimiento', args.desde).lte('fecha_vencimiento', args.hasta).neq('estado_cobro', 'pagada')
             return { eventos: eventos || [], vencimientos_facturas: (venc || []).map((f: any) => ({ numero: f.numero, cliente: f.cliente_razon_social, vence: f.fecha_vencimiento, pendiente: formatEuro(Number(f.total) - Number(f.importe_cobrado || 0)) })) }
+        }
+        case 'calcular_pieza': {
+            const { data: cfg } = await ctx.supabase.from('calculadora_config').select('precios, materiales_extra').eq('empresa_id', ctx.empresaId).maybeSingle()
+            const todos: Material[] = [...MATERIALES, ...((cfg?.materiales_extra || []) as Material[])]
+            const q = String(args.material || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            const norm = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            const tokens = q.split(/[\s,/()-]+/).filter(t => t.length >= 2)
+            const puntos = (m: Material) => tokens.reduce((a, t) => a + (norm(m.nombre + ' ' + m.norma + ' ' + m.id).includes(t) ? 1 : 0), 0)
+            const candidatos = todos.map(m => ({ m, p: puntos(m) })).filter(x => x.p > 0).sort((a, b) => b.p - a.p)
+            if (!candidatos.length) return { error: `No reconozco el material "${args.material}". Pregunta cuál es (acero, inox, aluminio, latón, bronce, plástico...).` }
+            const material = candidatos[0].m
+            const propio = cfg?.precios?.[material.id]
+            const mercado = await obtenerMercado()
+            const precioKg = propio?.precioKg ? Number(propio.precioKg) : precioConMercado(material.precioKg, material.indice, material.sensibilidad, mercado.cotizaciones, INDICES_REFERENCIA)
+            const forma = args.forma as FormaId
+            const cant = Math.max(1, Math.round(Number(args.cantidad) || 1))
+            const r = calcular({
+                material, precioKg, forma, perfil: args.perfil, final: args.medidas || {},
+                sobremedida: { seccion: Number(args.sobremedida_mm) || 0, largo: 0, redondearComercial: false },
+                cantidad: cant, kerf: 0, largoBarra: 0, merma: 0, descontarViruta: false, operaciones: [], tratamientos: [], otrosLote: 0, margen: 0,
+            })
+            return {
+                material: `${material.nombre} (${material.norma}, ${material.densidad} g/cm³)`,
+                otras_coincidencias: candidatos.slice(1, 4).map(x => x.m.nombre),
+                peso_por_pieza_kg: r.pesoNeto,
+                peso_bruto_por_pieza_kg: r.pesoBruto,
+                peso_total_kg: Math.round(r.pesoBruto * cant * 1000) / 1000,
+                precio_material_eur_kg: precioKg,
+                origen_precio: propio?.precioKg ? `precio propio de la empresa (${propio.fecha})` : 'precio orientativo de almacén ajustado al mercado de hoy',
+                coste_material_por_pieza: formatEuro(r.costeMaterialLote / cant),
+                coste_material_total: formatEuro(r.costeMaterialLote),
+                nota: 'Solo material. Para tiempos de máquina, tratamientos y precio de venta, que use la Calculadora del ERP (menú Calculadora).',
+            }
         }
         case 'buscar_catalogo': {
             const t = String(args.texto || '').trim()
@@ -306,6 +380,47 @@ async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimo
             const accion = await crearAccion(ctx, 'email_documento', payload, describirAccion('email_documento', payload))
             estado.accion = accion
             return { preparado: true, pendiente_de_confirmacion: true, documento: doc.numero, cliente: doc.cliente_razon_social, para: destinatarios, asunto, instruccion: 'NO se ha enviado todavía. Di en una frase que está listo y que pulse Confirmar (o responda "sí").' }
+        }
+        case 'preparar_correo': {
+            if (!tienePermiso(ctx.rol, 'enviar')) return { error: 'Tu rol no permite enviar correos.' }
+            const dest = String(args.destinatario || '').trim()
+            let destinatarios: string[] = [], nombre = dest, tipoDest = args.tipo_destinatario || 'otro'
+            if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dest)) {
+                destinatarios = [dest.toLowerCase()]
+            } else {
+                const buscar = async (tabla: 'proveedores' | 'contactos') => (await ctx.supabase.from(tabla).select('id, razon_social, email' + (tabla === 'contactos' ? ', email_facturacion' : '')).ilike('razon_social', `%${dest}%`).limit(5)).data || []
+                const orden: ('proveedores' | 'contactos')[] = tipoDest === 'cliente' ? ['contactos', 'proveedores'] : ['proveedores', 'contactos']
+                let encontrados: any[] = [], tabla: string = ''
+                for (const t of orden) { encontrados = await buscar(t); if (encontrados.length) { tabla = t; break } }
+                if (!encontrados.length) return { error: `No encuentro ningún proveedor ni cliente llamado "${dest}". Pide el email.` }
+                if (encontrados.length > 1 && !encontrados.some((x: any) => x.razon_social.toLowerCase() === dest.toLowerCase())) return { varias_coincidencias: encontrados.map((x: any) => x.razon_social), instruccion: 'Pregunta a cuál.' }
+                const elegido = encontrados.find((x: any) => x.razon_social.toLowerCase() === dest.toLowerCase()) || encontrados[0]
+                nombre = elegido.razon_social
+                tipoDest = tabla === 'proveedores' ? 'proveedor' : 'cliente'
+                const email = elegido.email_facturacion || elegido.email
+                if (!email) return { error: `${elegido.razon_social} no tiene email guardado. Pide la dirección de correo.` }
+                destinatarios = String(email).split(/[,;]/).map((s: string) => s.trim()).filter(Boolean)
+            }
+            // Barrera de servidor: aunque el modelo proponga adjuntos, solo se
+            // mantienen si el usuario ha pedido adjuntar algo en sus últimos mensajes.
+            const pidioAdjunto = ultimosUsuario.some(t => /adjunt|pdf|con (la|el) (factura|presupuesto|albar)|m[aá]nda(le|les)? (la|el) (factura|presupuesto|albar)/i.test(t))
+            const adjuntos: any[] = []
+            let avisoAdjuntos: string | undefined
+            if ((args.adjuntar || []).length) {
+                if (!pidioAdjunto) {
+                    avisoAdjuntos = 'Se han QUITADO los adjuntos: el usuario no ha pedido adjuntar nada.'
+                } else {
+                    for (const a of args.adjuntar) {
+                        const docs = await buscarDocumentoPorNumero(ctx, a.tipo_documento, a.numero)
+                        if (docs.length !== 1) return { error: docs.length ? `Hay varios documentos que coinciden con "${a.numero}". Pregunta cuál.` : `No encuentro ${a.tipo_documento} "${a.numero}".` }
+                        adjuntos.push({ tipo: a.tipo_documento, documentoId: docs[0].id, numero: docs[0].numero })
+                    }
+                }
+            }
+            const payload = { destinatarios, destinatarioNombre: nombre, tipoDestinatario: tipoDest, cc: args.cc || [], asunto: args.asunto, cuerpo: args.mensaje, adjuntos }
+            const accion = await crearAccion(ctx, 'email_libre', payload, describirAccion('email_libre', payload))
+            estado.accion = accion
+            return { preparado: true, pendiente_de_confirmacion: true, para: destinatarios, adjuntos: adjuntos.map(a => a.numero), aviso: avisoAdjuntos, instruccion: 'No se ha enviado. Di en una frase que está listo (menciona si va sin adjuntos) y pide confirmación.' }
         }
         case 'preparar_cobro': {
             if (ctx.rol === 'lectura') return { error: 'Tu rol es de solo lectura.' }
@@ -478,7 +593,7 @@ export async function runErpAssistant(ctx: Contexto, messages: ChatMessage[]): P
                 try { args = JSON.parse(call.function.arguments || '{}') } catch { }
                 let resultado: any
                 try {
-                    resultado = await ejecutarAccionTool(ctx, call.function.name, args, ultimoUsuario, estado)
+                    resultado = await ejecutarAccionTool(ctx, call.function.name, args, ultimoUsuario, estado, messages.filter(m => m.role === 'user').slice(-3).map(m => m.content))
                     if (resultado === undefined) resultado = await ejecutarLectura(ctx.supabase, call.function.name, args)
                     if (resultado === undefined) resultado = { error: `Herramienta desconocida: ${call.function.name}` }
                 } catch (e: any) {

@@ -84,7 +84,7 @@ function tecladoInicio(ctx: Contexto): Teclado {
 }
 
 async function panelInicio(s: Sesion) {
-    await enviar(s.chatId, `Hola, <b>${esc(s.ctx.nombre.split(' ')[0])}</b>. ¿Qué quieres consultar o registrar?\n\n<i>También puedes escribirme o mandarme un audio en lenguaje normal, o una foto de un ticket.</i>`, tecladoInicio(s.ctx))
+    await enviar(s.chatId, `Hola, <b>${esc(s.ctx.nombre.split(" ")[0])}</b>, soy <b>El Maikel</b> 👋 ¿Qué quieres consultar o registrar?\n\n<i>También puedes escribirme o mandarme un audio en lenguaje normal, o una foto de un ticket.</i>`, tecladoInicio(s.ctx))
 }
 
 const AYUDA = `<b>Cómo usar el bot</b>
@@ -660,7 +660,7 @@ async function procesarCallback(s: Sesion, cb: any) {
         const { data: doc } = await s.ctx.supabase.from(tipoDoc === 'factura' ? 'facturas' : 'presupuestos').select('*').eq('id', a2).maybeSingle()
         if (!doc) return enviar(s.chatId, 'Documento no encontrado.')
         await escribiendo(s.chatId, 'upload_document')
-        const pdf = await pdfDeDocumento(doc, tipoDoc)
+        const pdf = await pdfDeDocumento(doc, tipoDoc, s.ctx)
         return enviarDocumento(s.chatId, pdf, nombreArchivo(doc, tipoDoc), `${tipoDoc === 'factura' ? 'Factura' : 'Presupuesto'} <b>${esc(doc.numero)}</b> · ${esc(doc.cliente_razon_social)}`)
     }
     if (tipo === 'ok' || tipo === 'no') {

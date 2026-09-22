@@ -3,7 +3,8 @@ import type { Contexto } from '@/lib/auth'
 import { assertPermiso, ErrorPermiso } from '@/lib/auth'
 import { tienePermiso } from '@/lib/permisos'
 import { formatCurrency } from '@/lib/utils'
-import { enviarDocumentoPorCorreo, NOMBRE, type TipoDocumento } from '@/lib/documentos/servidor'
+import { enviarDocumentoPorCorreo, pdfDeDocumento, nombreArchivo, TABLA, NOMBRE, type TipoDocumento } from '@/lib/documentos/servidor'
+import { enviarCorreo, getEmpresa, registrarEnvio } from '@/lib/email/mailer'
 import { registrarCobro } from '@/lib/cobros/servidor'
 import { crearGasto } from '@/lib/gastos/servidor'
 import { etiquetaMetodo } from '@/lib/cobros/vencimientos'
@@ -24,7 +25,7 @@ import { notificarCobroTelegram } from '@/lib/telegram/notificaciones'
  * 30 minutos y solo la puede confirmar el usuario que la creó.
  */
 
-export type TipoAccion = 'email_documento' | 'reclamacion' | 'cobro' | 'gasto' | 'presupuesto'
+export type TipoAccion = 'email_documento' | 'email_libre' | 'reclamacion' | 'cobro' | 'gasto' | 'presupuesto'
 
 export interface Accion {
     id: string
@@ -143,6 +144,28 @@ async function ejecutarSegunTipo(ctx: Contexto, a: Accion): Promise<ResultadoAcc
                 datos: r,
             }
         }
+        case 'email_libre': {
+            assertPermiso(ctx, 'enviar')
+            // Solo se adjunta lo que quedó en la acción (y eso solo entra si el usuario lo pidió).
+            const adjuntos = []
+            for (const a of (p.adjuntos || []) as { tipo: TipoDocumento; documentoId: string }[]) {
+                const { data: doc } = await ctx.supabase.from(TABLA[a.tipo]).select('*').eq('id', a.documentoId).maybeSingle()
+                if (!doc) throw new Error('Uno de los documentos a adjuntar ya no existe.')
+                adjuntos.push({ filename: nombreArchivo(doc, a.tipo), content: await pdfDeDocumento(doc, a.tipo, ctx), contentType: 'application/pdf' })
+            }
+            const empresa = await getEmpresa(ctx)
+            const res = await enviarCorreo({ to: p.destinatarios, cc: p.cc, subject: p.asunto, cuerpo: p.cuerpo, attachments: adjuntos }, empresa)
+            await registrarEnvio(ctx, {
+                destinatario: res.cc.length ? `${res.to.join(', ')} (CC: ${res.cc.join(', ')})` : res.to.join(', '),
+                tipo_documento: p.tipoDestinatario === 'proveedor' ? 'Correo a proveedor' : 'Correo',
+                numero_documento: (p.adjuntos || []).map((a: any) => a.numero).join(', ') || null,
+                asunto: p.asunto,
+                mensaje: p.cuerpo,
+                motivo: 'correo',
+            })
+            await auditar(ctx, 'correo_enviado', { tipo: p.tipoDestinatario || 'correo', ref: p.destinatarioNombre || res.to.join(', ') }, { to: res.to, asunto: p.asunto, adjuntos: adjuntos.map(a => a.filename) })
+            return { ok: true, mensaje: `✅ Correo enviado a ${res.to.join(', ')}${adjuntos.length ? ` con ${adjuntos.map(a => a.filename).join(', ')}` : ' (sin adjuntos)'}. Queda registrado en el historial de correos.`, datos: { to: res.to } }
+        }
         case 'cobro': {
             const r = await registrarCobro(ctx, {
                 facturaId: p.facturaId,
@@ -221,6 +244,10 @@ export function describirAccion(tipo: TipoAccion, p: any): string {
             return `📧 Enviar ${NOMBRE[p.tipo as TipoDocumento]?.toLowerCase()} ${p.numero} (${p.cliente})\n` +
                 `Para: ${(p.destinatarios || []).join(', ')}${p.cc?.length ? `\nCC: ${p.cc.join(', ')}` : ''}\n` +
                 `Asunto: ${p.asunto}\nAdjunto: PDF de ${p.numero}\n\n${p.cuerpo}`
+        case 'email_libre':
+            return `📧 Correo a ${p.destinatarioNombre || (p.destinatarios || []).join(', ')}\n` +
+                `Para: ${(p.destinatarios || []).join(', ')}${p.cc?.length ? `\nCC: ${p.cc.join(', ')}` : ''}\n` +
+                `Asunto: ${p.asunto}\nAdjuntos: ${(p.adjuntos || []).length ? p.adjuntos.map((a: any) => `PDF de ${a.numero}`).join(', ') : 'ninguno'}\n\n${p.cuerpo}`
         case 'reclamacion':
             return `📧 Reclamar pago de ${p.numero} (${p.cliente})\nPendiente: ${formatCurrency(p.pendiente)} · ${p.etiqueta}\n` +
                 `Para: ${(p.destinatarios || []).join(', ')}\nAsunto: ${p.asunto}\n\n${p.cuerpo}`
