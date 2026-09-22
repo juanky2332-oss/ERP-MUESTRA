@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { processDocumentWithOCR } from '@/app/actions/ocr'
+import { subirArchivoPrivado } from '@/lib/archivos-cliente'
 import { ingestDocument } from '@/actions/ingest-document'
 import { toast } from 'sonner'
 import { Loader2, Upload, ScanLine, Save, ArrowLeft, Check, ChevronsUpDown } from 'lucide-react'
@@ -108,27 +109,8 @@ export default function NewAlbaranFirmadoPage() {
         try {
             let fileUrl = ''
 
-            // 1. Upload File
-            const fileExt = file.name.split('.').pop()
-            const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
-            const bucketName = 'albaranes-firmados' // User needs to ensure this exists
-
-            const { data: uploadData, error: uploadError } = await supabase.storage
-                .from(bucketName)
-                .upload(fileName, file)
-
-            if (uploadError) {
-                // Attempt public URL generation even if upload reports error (sometimes flakiness)
-                // But realistically, if upload fails, we are stuck.
-                // Fallback to 'gastos' bucket if 'albaranes-firmados' doesn't exist? No, stick to design.
-                console.error('Upload error', uploadError)
-                toast.warning('Error al subir archivo. Verifica que el bucket "albaranes-firmados" exista en Supabase.')
-                // Try to continue logic? No.
-                throw new Error("Fallo en subida de archivo")
-            } else {
-                const { data: publicURL } = supabase.storage.from(bucketName).getPublicUrl(fileName)
-                fileUrl = publicURL.publicUrl
-            }
+            // 1. Subida privada a la carpeta de la empresa
+            fileUrl = await subirArchivoPrivado('albaranes-firmados', file, 'firmado')
 
             // 2. Insert DB
             const { error: dbError } = await supabase.from('albaranes_firmados').insert({

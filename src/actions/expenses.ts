@@ -1,69 +1,57 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { getNextSequenceNumber } from '@/lib/sequences'
+import { getContexto, assertPermiso, mensajeError } from '@/lib/auth'
+import { auditar } from '@/lib/auditoria'
+import { crearGasto, vincularProveedor } from '@/lib/gastos/servidor'
 
 export async function createExpense(data: any) {
-    const supabase = await createClient()
-
     try {
-        // Generate 'G' sequence number
-        const seqNumero = await getNextSequenceNumber('gasto', supabase)
-        const originalNumero = data.numero || 'S/N'
-        const combinedNumero = `${seqNumero} / ${originalNumero}`
-
-        const payload = {
+        const ctx = await getContexto()
+        const inserted = await crearGasto(ctx, {
             ...data,
-            numero: combinedNumero,
-            referencia: data.referencia === data.numero ? '' : (data.referencia || ''),
-            importe: data.importe || data.total || 0,
-            base_imponible: data.base_imponible || data.subtotal || 0,
-            iva_porcentaje: data.iva_porcentaje || 21,
-            iva_importe: data.iva_importe || 0,
-            proveedor_cif: data.proveedor_cif || '',
-            created_at: new Date().toISOString()
-        }
-
-        const { data: insertedDoc, error } = await supabase
-            .from('gastos')
-            .insert(payload)
-            .select()
-            .single()
-
-        if (error) throw error
-
+            total: data.total ?? data.importe,
+            base_imponible: data.base_imponible ?? data.subtotal,
+            archivo_url: data.archivo_url || data.factura_url || null,
+        })
         revalidatePath('/gastos')
-        return { success: true, data: insertedDoc }
+        return { success: true, data: inserted }
     } catch (e) {
         console.error('Error creating expense:', e)
-        return { success: false, error: e }
+        return { success: false, error: { message: mensajeError(e) } }
     }
 }
+
 export async function updateExpense(id: string, data: any) {
-    const supabase = await createClient()
-
-    const { error } = await supabase
-        .from('gastos')
-        .update(data)
-        .eq('id', id)
-
-    if (error) return { success: false, error }
-
-    revalidatePath('/gastos')
-    return { success: true }
+    try {
+        const ctx = await getContexto()
+        assertPermiso(ctx, 'gastos')
+        const update = { ...data }
+        if (update.proveedor !== undefined && !update.proveedor_id) {
+            update.proveedor_id = await vincularProveedor(ctx, update.proveedor, update.proveedor_cif)
+        }
+        const { data: antes } = await ctx.supabase.from('gastos').select('numero, total, proveedor').eq('id', id).maybeSingle()
+        const { error } = await ctx.supabase.from('gastos').update(update).eq('id', id)
+        if (error) throw error
+        await auditar(ctx, 'gasto_editado', { tipo: 'gasto', id, ref: antes?.numero }, { antes, cambios: data })
+        revalidatePath('/gastos')
+        return { success: true }
+    } catch (e) {
+        return { success: false, error: { message: mensajeError(e) } }
+    }
 }
 
 export async function deleteExpense(id: string) {
-    const supabase = await createClient()
-
-    const { error } = await supabase
-        .from('gastos')
-        .delete()
-        .eq('id', id)
-
-    if (error) return { success: false, error }
-
-    revalidatePath('/gastos')
-    return { success: true }
+    try {
+        const ctx = await getContexto()
+        assertPermiso(ctx, 'gastos')
+        const { data: antes } = await ctx.supabase.from('gastos').select('numero, total, proveedor').eq('id', id).maybeSingle()
+        const { error } = await ctx.supabase.from('gastos').delete().eq('id', id)
+        if (error) throw error
+        await auditar(ctx, 'gasto_eliminado', { tipo: 'gasto', id, ref: antes?.numero }, antes || {})
+        revalidatePath('/gastos')
+        return { success: true }
+    } catch (e) {
+        return { success: false, error: { message: mensajeError(e) } }
+    }
 }

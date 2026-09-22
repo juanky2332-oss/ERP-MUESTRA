@@ -39,11 +39,24 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useInvoices } from '@/hooks/use-invoices'
+import { useSearchParams } from 'next/navigation'
+import { EstadoCobroBadge } from '@/components/cobros/estado-cobro'
+import { MarcarPagadaDialog } from '@/components/cobros/marcar-pagada-dialog'
+import { ReclamarDialog } from '@/components/cobros/reclamar-dialog'
+import { HistorialCobrosSheet } from '@/components/cobros/historial-cobros-sheet'
+import { infoCobro } from '@/lib/cobros/vencimientos'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { MoreHorizontal, Wallet, History, Ban, CircleDollarSign } from 'lucide-react'
 
 export default function FacturasPage() {
     const { month, year } = useGlobalFilter()
+    const searchParams = useSearchParams()
     const [page, setPage] = useState(1)
-    const [search, setSearch] = useState('')
+    const [search, setSearch] = useState(searchParams.get('buscar') || '')
+    const [pagar, setPagar] = useState<{ id: string; modo: 'total' | 'parcial' } | null>(null)
+    const [reclamar, setReclamar] = useState<string | null>(null)
+    const [historial, setHistorial] = useState<string | null>(null)
+    const refrescar = () => queryClient.invalidateQueries({ queryKey: ['facturas'] })
     const [activeTab, setActiveTab] = useState<string>('all')
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
     const pageSize = 10
@@ -279,11 +292,15 @@ export default function FacturasPage() {
                                             </TableCell>
                                             <TableCell className="py-4 text-center">
                                                 <div className="flex flex-col gap-1 items-center">
-                                                    {doc.statuses?.includes('pagada') && (
-                                                        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 font-bold text-[10px]"><Check className="w-3 h-3 mr-1" /> PAGADA</Badge>
+                                                    {(doc as any).anulada ? (
+                                                        <Badge className="bg-slate-100 text-slate-500 border-slate-200 font-bold text-[10px]"><Ban className="w-3 h-3 mr-1" /> ANULADA</Badge>
+                                                    ) : (
+                                                        <button onClick={() => setHistorial(doc.id)} title="Ver seguimiento de cobro">
+                                                            <EstadoCobroBadge factura={doc} />
+                                                        </button>
                                                     )}
-                                                    {doc.statuses?.includes('pendiente') && (
-                                                        <Badge className="bg-orange-50 text-orange-700 border-orange-200 font-bold text-[10px]">PENDIENTE</Badge>
+                                                    {!(doc as any).anulada && infoCobro(doc as any).estado === 'parcial' && (
+                                                        <span className="text-[10px] font-bold text-sky-600 tabular-nums">Pendiente {formatCurrency(infoCobro(doc as any).pendiente)}</span>
                                                     )}
                                                     {doc.statuses?.includes('enviado') && (
                                                         <Badge className="bg-blue-50 text-blue-700 border-blue-200 font-bold text-[10px]"><Mail className="w-3 h-3 mr-1" /> ENVIADA</Badge>
@@ -302,6 +319,38 @@ export default function FacturasPage() {
                                                         }}
                                                     />
                                                     <div className="flex items-center gap-1 opacity-100 group-hover:opacity-100 transition-opacity">
+                                                        {!(doc as any).anulada && infoCobro(doc as any).estado !== 'pagada' && (
+                                                            <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-bold hidden lg:inline-flex" onClick={() => setPagar({ id: doc.id, modo: 'total' })} title="Marcar como pagada">
+                                                                <Check className="h-3.5 w-3.5 mr-1" /> Pagada
+                                                            </Button>
+                                                        )}
+                                                        <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild>
+                                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500"><MoreHorizontal className="h-4 w-4" /></Button>
+                                                            </DropdownMenuTrigger>
+                                                            <DropdownMenuContent align="end">
+                                                                {!(doc as any).anulada && infoCobro(doc as any).estado !== 'pagada' && (
+                                                                    <>
+                                                                        <DropdownMenuItem onClick={() => setPagar({ id: doc.id, modo: 'total' })}><Check className="h-4 w-4 mr-2" /> Marcar como pagada</DropdownMenuItem>
+                                                                        <DropdownMenuItem onClick={() => setPagar({ id: doc.id, modo: 'parcial' })}><CircleDollarSign className="h-4 w-4 mr-2" /> Registrar pago parcial</DropdownMenuItem>
+                                                                        <DropdownMenuItem onClick={() => setReclamar(doc.id)}><Mail className="h-4 w-4 mr-2" /> Reclamar pago</DropdownMenuItem>
+                                                                    </>
+                                                                )}
+                                                                <DropdownMenuItem onClick={() => setHistorial(doc.id)}><History className="h-4 w-4 mr-2" /> Cobros y vencimiento</DropdownMenuItem>
+                                                                {!(doc as any).anulada && (
+                                                                    <>
+                                                                        <DropdownMenuSeparator />
+                                                                        <DropdownMenuItem className="text-rose-600" onClick={async () => {
+                                                                            const motivo = prompt(`Motivo para anular la factura ${doc.numero} (queda registrada, no se borra):`)
+                                                                            if (!motivo?.trim()) return
+                                                                            const { anularFactura } = await import('@/actions/documents')
+                                                                            const r = await anularFactura(doc.id, motivo)
+                                                                            if (r.success) { toast.success('Factura anulada'); refrescar() } else toast.error(String(r.error))
+                                                                        }}><Ban className="h-4 w-4 mr-2" /> Anular factura</DropdownMenuItem>
+                                                                    </>
+                                                                )}
+                                                            </DropdownMenuContent>
+                                                        </DropdownMenu>
                                                         {/* Edit Button */}
                                                         <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => { setEditingDoc({ ...doc, lineas: doc.lineas ? JSON.parse(JSON.stringify(doc.lineas)) : [] }); setEditOpen(true) }}>
                                                             <FileEdit className="h-4 w-4" />
@@ -318,6 +367,8 @@ export default function FacturasPage() {
                                                                     if (res.success) {
                                                                         toast.success('Factura eliminada')
                                                                         queryClient.invalidateQueries({ queryKey: ['facturas'] })
+                                                                    } else {
+                                                                        toast.error((res.error as any)?.message || 'No se pudo eliminar')
                                                                     }
                                                                 }
                                                             }}
@@ -363,13 +414,17 @@ export default function FacturasPage() {
                                     </div>
                                     <Switch checked={editingDoc.statuses?.includes('enviado')} onCheckedChange={(checked) => { handleStatusUpdate(editingDoc, 'ENVIADA', checked); setEditingDoc({ ...editingDoc, statuses: checked ? [...(editingDoc.statuses || []), 'enviado'] : (editingDoc.statuses || []).filter((s: string) => s !== 'enviado') }) }} />
                                 </div>
-                                <div className="flex items-center justify-between p-3 border rounded-lg hover:bg-emerald-50 cursor-pointer" onClick={() => { handleStatusUpdate(editingDoc, 'PAGADA'); setEditingDoc({ ...editingDoc, statuses: ['pagada'] }) }}>
-                                    <Label className="font-bold text-emerald-900 cursor-pointer">Pagada</Label>
-                                    <div className={`w-4 h-4 border-2 rounded-full ${editingDoc.statuses?.includes('pagada') ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`} />
-                                </div>
-                                <div className="flex items-center justify-between p-3 border rounded-lg hover:bg-orange-50 cursor-pointer" onClick={() => { handleStatusUpdate(editingDoc, 'PENDIENTE'); setEditingDoc({ ...editingDoc, statuses: ['pendiente'] }) }}>
-                                    <Label className="font-bold cursor-pointer">Pendiente</Label>
-                                    <div className={`w-4 h-4 border-2 rounded-full ${editingDoc.statuses?.includes('pendiente') ? 'bg-orange-500 border-orange-500' : 'border-slate-300'}`} />
+                                <div className="flex items-center justify-between p-3 border rounded-lg bg-white">
+                                    <div className="flex flex-col gap-1">
+                                        <span className="font-bold text-slate-900">Cobro</span>
+                                        <EstadoCobroBadge factura={editingDoc} />
+                                    </div>
+                                    <div className="flex gap-2">
+                                        {infoCobro(editingDoc).estado !== 'pagada' && (
+                                            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => { setEditOpen(false); setPagar({ id: editingDoc.id, modo: 'total' }) }}>Marcar pagada</Button>
+                                        )}
+                                        <Button size="sm" variant="outline" onClick={() => { setEditOpen(false); setHistorial(editingDoc.id) }}>Historial</Button>
+                                    </div>
                                 </div>
                             </div>
                             <div className="border rounded-xl p-4 space-y-4">
@@ -464,6 +519,10 @@ export default function FacturasPage() {
                                         <Input type="date" value={editingDoc.fecha ? editingDoc.fecha.split('T')[0] : ''} onChange={e => setEditingDoc({ ...editingDoc, fecha: e.target.value })} className="mt-1" />
                                     </div>
                                     <div>
+                                        <Label className="text-xs text-slate-500 font-bold uppercase">Vencimiento</Label>
+                                        <Input type="date" value={editingDoc.fecha_vencimiento ? String(editingDoc.fecha_vencimiento).slice(0, 10) : ''} onChange={e => setEditingDoc({ ...editingDoc, fecha_vencimiento: e.target.value || null })} className="mt-1" />
+                                    </div>
+                                    <div>
                                         <Label className="text-xs text-slate-500 font-bold uppercase">Su Referencia / Pedido</Label>
                                         <Input value={editingDoc.pedido_referencia || ''} onChange={e => setEditingDoc({ ...editingDoc, pedido_referencia: e.target.value })} placeholder="Referencia del cliente..." className="mt-1" />
                                     </div>
@@ -506,6 +565,7 @@ export default function FacturasPage() {
                                         cliente_email: editingDoc.cliente_email,
                                         cliente_telefono: editingDoc.cliente_telefono,
                                         fecha: editingDoc.fecha,
+                                        fecha_vencimiento: editingDoc.fecha_vencimiento || null,
                                         pedido_referencia: editingDoc.pedido_referencia,
                                         observaciones: editingDoc.observaciones,
                                         lineas,
@@ -519,6 +579,9 @@ export default function FacturasPage() {
                     )}
                 </DialogContent>
             </Dialog>
+            <MarcarPagadaDialog facturaId={pagar?.id || null} modoInicial={pagar?.modo} open={!!pagar} onOpenChange={v => !v && setPagar(null)} onDone={refrescar} />
+            <ReclamarDialog facturaId={reclamar} open={!!reclamar} onOpenChange={v => !v && setReclamar(null)} onDone={refrescar} />
+            <HistorialCobrosSheet facturaId={historial} open={!!historial} onOpenChange={v => !v && setHistorial(null)} onChanged={refrescar} />
         </>
     )
 }

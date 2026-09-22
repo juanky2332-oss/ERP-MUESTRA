@@ -2,64 +2,49 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, FileInput, FileText, Menu, Plus } from "lucide-react"
+import { LayoutDashboard, CalendarDays, Wallet, Menu, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { QuickCreateMenu } from "@/components/layout/quick-create-menu"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { SidebarContent } from "@/components/layout/sidebar"
 import { useState } from "react"
 
-/** Barra inferior fija para móvil: las 5 acciones que más usa un técnico en campo. */
+/** Barra inferior fija para móvil: Inicio · Agenda · Crear · Cobros · Más. */
 export function MobileBottomNav() {
     const pathname = usePathname()
     const [moreOpen, setMoreOpen] = useState(false)
 
-    const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/")
+    const isActive = (href: string) => href === "/" ? pathname === "/" : (pathname === href || pathname.startsWith(href + "/"))
+    const item = (href: string, label: string, Icon: any) => (
+        <Link
+            href={href}
+            className={cn(
+                "flex flex-col items-center justify-center gap-1 h-full text-[10px] font-bold transition-colors",
+                isActive(href) ? "text-primary" : "text-muted-foreground"
+            )}
+        >
+            <Icon className="h-5 w-5" />
+            {label}
+        </Link>
+    )
 
     return (
         <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-card/95 backdrop-blur-lg border-t border-border pb-[env(safe-area-inset-bottom)]">
             <div className="grid grid-cols-5 items-center h-16">
-                <Link
-                    href="/"
-                    className={cn(
-                        "flex flex-col items-center justify-center gap-1 h-full text-[10px] font-bold",
-                        isActive("/") && pathname === "/" ? "text-primary" : "text-muted-foreground"
-                    )}
-                >
-                    <LayoutDashboard className="h-5 w-5" />
-                    Inicio
-                </Link>
-                <Link
-                    href="/facturas"
-                    className={cn(
-                        "flex flex-col items-center justify-center gap-1 h-full text-[10px] font-bold",
-                        isActive("/facturas") ? "text-primary" : "text-muted-foreground"
-                    )}
-                >
-                    <FileInput className="h-5 w-5" />
-                    Facturas
-                </Link>
+                {item("/", "Inicio", LayoutDashboard)}
+                {item("/agenda", "Agenda", CalendarDays)}
 
                 <div className="flex items-center justify-center">
                     <QuickCreateMenu
                         trigger={
-                            <button className="h-14 w-14 rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30 flex items-center justify-center -translate-y-3 active:scale-90 transition-transform">
+                            <button aria-label="Crear" className="h-14 w-14 rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30 flex items-center justify-center -translate-y-3 active:scale-90 transition-transform">
                                 <Plus className="h-6 w-6" />
                             </button>
                         }
                     />
                 </div>
 
-                <Link
-                    href="/presupuestos"
-                    className={cn(
-                        "flex flex-col items-center justify-center gap-1 h-full text-[10px] font-bold",
-                        isActive("/presupuestos") ? "text-primary" : "text-muted-foreground"
-                    )}
-                >
-                    <FileText className="h-5 w-5" />
-                    Presup.
-                </Link>
+                {item("/cobros", "Cobros", Wallet)}
 
                 <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
                     <SheetTrigger asChild>

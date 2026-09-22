@@ -149,52 +149,11 @@ export function useBudgets({
 
     const createBudget = useMutation({
         mutationFn: async (newBudget: Partial<Presupuesto>) => {
-            // 1. Get next number
-            const { data: counter, error: counterError } = await supabase
-                .from('contadores')
-                .select('ultimo_numero')
-                .eq('tipo', 'presupuesto')
-                .single()
-
-            if (counterError && counterError.code !== 'PGRST116') {
-                throw counterError
-            }
-
-            const nextNum = (counter?.ultimo_numero || 0) + 1
-            const year = new Date().getFullYear()
-            const formattedNum = `P-${year}-${nextNum.toString().padStart(3, '0')}`
-
-            // source_document_id/type y *_origen_numero son campos solo para el
-            // PDF, no columnas reales de la tabla: nunca deben llegar al insert.
-            const {
-                source_document_id, source_document_type,
-                albaran_origen_numero, presupuesto_origen_numero,
-                ...cleanBudget
-            } = newBudget as any
-
-            const payload = {
-                ...cleanBudget,
-                numero: formattedNum,
-                fecha: newBudget.fecha || new Date().toISOString()
-            }
-
-            // 2. Insert Budget
-            const { data, error } = await supabase
-                .from('presupuestos')
-                .insert(payload)
-                .select()
-                .single()
-
-            if (error) throw error
-
-            // 3. Update counter
-            await supabase.from('contadores').upsert({
-                tipo: 'presupuesto',
-                anio: year,
-                ultimo_numero: nextNum
-            })
-
-            return data
+            // Numeración, auditoría y enlaces de origen se resuelven en el servidor.
+            const { createDocument } = await import('@/actions/documents')
+            const res = await createDocument(newBudget, 'presupuesto')
+            if (!res.success) throw res.error
+            return res.data
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['budgets'] })
@@ -207,15 +166,10 @@ export function useBudgets({
 
     const updateBudget = useMutation({
         mutationFn: async ({ id, ...updates }: Partial<Presupuesto> & { id: string }) => {
-            const { data, error } = await supabase
-                .from('presupuestos')
-                .update(updates)
-                .eq('id', id)
-                .select()
-                .single()
-
-            if (error) throw error
-            return data
+            const { updateDocument } = await import('@/actions/documents')
+            const res = await updateDocument(id, updates, 'presupuesto')
+            if (!res.success) throw res.error
+            return res
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['budgets'] })

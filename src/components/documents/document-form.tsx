@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm, useFieldArray, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -21,6 +21,8 @@ import { Contacto } from '@/types'
 import { PriceCalculator } from './price-calculator'
 import { ImportDocumentDialog } from './import-dialog'
 import { DocumentPreviewModal } from './document-preview-modal'
+import { CatalogoPicker } from '@/components/catalogo/catalogo-picker'
+import { previsualizarVencimiento } from '@/actions/documents'
 
 // Schema
 const lineItemSchema = z.object({
@@ -91,6 +93,28 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
     })
 
 
+    // Vencimiento (facturas) calculado con las condiciones de pago del cliente,
+    // editable a mano. Validez (presupuestos), por defecto 30 días.
+    const [vencimiento, setVencimiento] = useState<string>(initialData?.fecha_vencimiento || '')
+    const [vencimientoManual, setVencimientoManual] = useState<boolean>(!!initialData?.fecha_vencimiento)
+    const [condicionTexto, setCondicionTexto] = useState<string | null>(null)
+    const [fechaValidez, setFechaValidez] = useState<string>(initialData?.fecha_validez || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+    const clienteIdWatch = useWatch({ control: form.control, name: 'cliente_id' })
+    const fechaWatch = useWatch({ control: form.control, name: 'fecha' })
+
+    useEffect(() => {
+        if (type !== 'factura' || !clienteIdWatch) return
+        const f = fechaWatch instanceof Date ? format(fechaWatch, 'yyyy-MM-dd') : String(fechaWatch || '').slice(0, 10)
+        if (!f) return
+        let cancel = false
+        previsualizarVencimiento(clienteIdWatch, f).then((r: any) => {
+            if (cancel || !r?.success) return
+            setCondicionTexto(r.condicion || null)
+            if (!vencimientoManual) setVencimiento(r.fecha || '')
+        })
+        return () => { cancel = true }
+    }, [type, clienteIdWatch, fechaWatch, vencimientoManual])
+
     const { fields, append, remove } = useFieldArray({
         control: form.control,
         name: 'lineas'
@@ -118,6 +142,8 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
             total: total,
             source_document_id: sourceDocInfo?.id,
             source_document_type: sourceDocInfo?.type,
+            ...(type === 'factura' && vencimientoManual && vencimiento ? { fecha_vencimiento: vencimiento } : {}),
+            ...(type === 'presupuesto' && fechaValidez ? { fecha_validez: fechaValidez } : {}),
             albaran_origen_numero: sourceDocInfo?.type === 'albaran' ? sourceDocInfo?.numero : undefined,
             presupuesto_origen_numero: sourceDocInfo?.type === 'presupuesto' ? sourceDocInfo?.numero : undefined
         }
@@ -217,6 +243,26 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
                                 )}
                             />
                         </div>
+                        {type === 'factura' && (
+                            <div className="mt-4 max-w-sm bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900 rounded p-3">
+                                <p className="text-[10px] text-amber-700 dark:text-amber-400 font-bold uppercase">Vencimiento</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <Input type="date" value={vencimiento} onChange={e => { setVencimiento(e.target.value); setVencimientoManual(true) }} className="h-9 font-semibold" />
+                                    {vencimientoManual && (
+                                        <Button type="button" variant="ghost" size="sm" className="text-xs" onClick={() => setVencimientoManual(false)}>Auto</Button>
+                                    )}
+                                </div>
+                                <p className="text-[11px] text-muted-foreground mt-1">
+                                    {vencimientoManual ? 'Fecha puesta a mano.' : condicionTexto ? `Calculado: ${condicionTexto}.` : clienteIdWatch ? 'Sin vencimiento automático para este cliente.' : 'Elige un cliente para calcularlo.'}
+                                </p>
+                            </div>
+                        )}
+                        {type === 'presupuesto' && (
+                            <div className="mt-4 max-w-sm bg-gray-50 border rounded p-3">
+                                <p className="text-[10px] text-gray-500 font-bold uppercase">Válido hasta</p>
+                                <Input type="date" value={fechaValidez} onChange={e => setFechaValidez(e.target.value)} className="h-9 font-semibold mt-1" />
+                            </div>
+                        )}
                         <div className="mt-4 max-w-sm">
                             <FormField
                                 control={form.control}
@@ -333,6 +379,12 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
                             </TableBody>
                         </Table>
                         <div className="p-4 border-t border-gray-100">
+                            <CatalogoPicker onSelect={(it) => {
+                                const vacia = lines?.length === 1 && !lines[0]?.descripcion && !Number(lines[0]?.precio_unitario)
+                                if (vacia) remove(0)
+                                append({ descripcion: it.referencia ? `${it.nombre} (${it.referencia})` : it.nombre, cantidad: 1, precio_unitario: Number(it.precio_venta) || 0, importe: Number(it.precio_venta) || 0 })
+                                if (vacia && it.iva_porcentaje != null) form.setValue('iva_porcentaje', Number(it.iva_porcentaje))
+                            }} />
                             <Button type="button" variant="outline" size="sm" onClick={() => append({ descripcion: '', cantidad: 1, precio_unitario: 0, importe: 0 })}>
                                 <Plus className="h-4 w-4 mr-2" /> Añadir Línea
                             </Button>

@@ -1,5 +1,8 @@
-import { FileText, Box, FileInput, Receipt, Activity, TrendingUp, Clock, Mail, AlertTriangle, Send, ArrowRight, Users } from "lucide-react"
-import { createClient } from "@/lib/supabase/server"
+import { FileText, Box, FileInput, Receipt, Activity, TrendingUp, Clock, Mail, AlertTriangle, Send, ArrowRight, Users, CalendarDays, Wallet, CircleDot, Truck } from "lucide-react"
+import { getContexto } from "@/lib/auth"
+import { tienePermiso } from "@/lib/permisos"
+import { resumenCobros } from "@/lib/cobros/servidor"
+import { hoyISO, rangoDiaMadrid } from "@/lib/cobros/vencimientos"
 import { FinancialChart } from "@/components/dashboard/financial-chart"
 import Link from "next/link"
 import { format, startOfMonth, endOfMonth } from "date-fns"
@@ -12,7 +15,16 @@ import { OWN_COMPANY } from "@/lib/company"
 export const dynamic = 'force-dynamic'
 
 async function getStats(monthFilter: string | undefined) {
-  const supabase = await createClient()
+  const ctx = await getContexto()
+  const supabase = ctx.supabase
+  const eco = tienePermiso(ctx.rol, 'economico')
+  const hoy = hoyISO()
+  const rHoy = rangoDiaMadrid(hoy)
+  const [rc, { data: eventosHoy }, { data: gastosMes }] = await Promise.all([
+    resumenCobros(ctx),
+    supabase.from('eventos').select('id, titulo, tipo, estado, inicio, todo_el_dia, contactos(razon_social)').gte('inicio', rHoy.desde).lte('inicio', rHoy.hasta).neq('estado', 'cancelado').order('inicio'),
+    supabase.from('gastos').select('total').gte('fecha', hoy.slice(0, 8) + '01'),
+  ])
 
   const [
     { data: presupuestos },
@@ -62,28 +74,12 @@ async function getStats(monthFilter: string | undefined) {
   const totalAlbaranesFirmados = filteredAlbaranesFirmados.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0)
   const netProfit = totalFacturado - totalGastos
 
-  // ---- Cobros: pendiente, vencido, cobrado este mes ----
-  const today = new Date()
-  const allFacturas = facturas || []
-  const facturasPendientes = allFacturas.filter((f: any) => !f.pagada)
-  const totalPendienteCobro = facturasPendientes.reduce((acc: number, f: any) => acc + (Number(f.total) || 0), 0)
-
-  const facturasVencidas = facturasPendientes.filter((f: any) => f.fecha_vencimiento && new Date(f.fecha_vencimiento) < today)
-  const totalVencido = facturasVencidas.reduce((acc: number, f: any) => acc + (Number(f.total) || 0), 0)
-
-  const now = new Date()
-  const startThisMonth = startOfMonth(now)
-  const endThisMonth = endOfMonth(now)
-  const cobradoEsteMes = allFacturas
-    .filter((f: any) => f.pagada && new Date(f.created_at) >= startThisMonth && new Date(f.created_at) <= endThisMonth)
-    .reduce((acc: number, f: any) => acc + (Number(f.total) || 0), 0)
-  const facturadoEsteMes = allFacturas
-    .filter((f: any) => new Date(f.created_at) >= startThisMonth && new Date(f.created_at) <= endThisMonth)
-    .reduce((acc: number, f: any) => acc + (Number(f.total) || 0), 0)
-
-  const topPendientes = [...facturasPendientes]
-    .sort((a: any, b: any) => (Number(b.total) || 0) - (Number(a.total) || 0))
-    .slice(0, 5)
+  // ---- Cobros: todo sale del motor de cobros (pagos parciales incluidos) ----
+  const totalPendienteCobro = rc.pendienteTotal
+  const totalVencido = rc.vencidoTotal
+  const cobradoEsteMes = rc.cobradoEsteMes
+  const facturadoEsteMes = rc.facturadoEsteMes
+  const topPendientes = [...rc.vencidas, ...rc.venceHoy, ...rc.proximas].slice(0, 6)
 
   // ---- Presupuestos pendientes de aceptación ----
   // Un presupuesto ya convertido en albarán ('traspasado' en su historial de
@@ -118,11 +114,18 @@ async function getStats(monthFilter: string | undefined) {
     cobros: {
       pendiente: totalPendienteCobro,
       vencido: totalVencido,
-      vencidasCount: facturasVencidas.length,
+      vencidasCount: rc.vencidas.length,
+      venceSemana: rc.venceEstaSemana,
+      parciales: rc.parciales.length,
+      parcialesImporte: rc.parciales.reduce((a, f) => a + f.info.pendiente, 0),
       cobradoEsteMes,
       facturadoEsteMes,
       topPendientes,
     },
+    gastosMes: (gastosMes || []).reduce((a: number, g: any) => a + Number(g.total || 0), 0),
+    eventosHoy: eventosHoy || [],
+    eco,
+    nombre: ctx.nombre.split(' ')[0],
     presupuestosPendientes: {
       count: presupuestosPendientes.length,
       total: totalPresupuestosPendientes,
@@ -148,45 +151,113 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
   return (
     <div className="space-y-10 pb-20">
-      {/* Cabecera de bienvenida dinámica */}
-      <div className="flex flex-col gap-6">
+      {/* Cabecera "Control de hoy" */}
+      <div className="flex flex-col gap-5">
         <div>
           <span className="text-[10px] font-extrabold text-primary uppercase tracking-[0.3em]">{OWN_COMPANY.nombre}</span>
           <h2 className="text-2xl md:text-3xl font-black tracking-tight text-foreground mt-1">
-            {greeting()}
+            {greeting()}, {stats.nombre}.
           </h2>
-          <p className="text-muted-foreground font-medium mt-1.5">
-            Hoy tienes{' '}
-            <span className="font-bold text-foreground">{stats.presupuestosPendientes.count} presupuesto{stats.presupuestosPendientes.count !== 1 ? 's' : ''} por cerrar</span>
-            {' '}y{' '}
-            <span className="font-bold text-foreground">{formatCurrency(stats.cobros.pendiente)} por cobrar</span>.
-          </p>
+          <div className="text-muted-foreground font-medium mt-2 space-y-0.5">
+            <p className="text-foreground font-bold">Hoy tienes:</p>
+            <ul className="text-sm space-y-0.5">
+              {stats.eco && <li>• <b className={stats.cobros.vencidasCount ? 'text-rose-600' : 'text-foreground'}>{stats.cobros.vencidasCount}</b> factura{stats.cobros.vencidasCount !== 1 ? 's' : ''} vencida{stats.cobros.vencidasCount !== 1 ? 's' : ''}.</li>}
+              {stats.eco && <li>• <b className="text-foreground">{stats.cobros.venceSemana}</b> factura{stats.cobros.venceSemana !== 1 ? 's' : ''} que vence{stats.cobros.venceSemana !== 1 ? 'n' : ''} esta semana.</li>}
+              <li>• <b className="text-foreground">{stats.presupuestosPendientes.count}</b> presupuesto{stats.presupuestosPendientes.count !== 1 ? 's' : ''} pendiente{stats.presupuestosPendientes.count !== 1 ? 's' : ''}.</li>
+              {stats.eco && <li>• <b className="text-foreground">{formatCurrency(stats.cobros.pendiente)}</b> pendiente de cobro.</li>}
+              <li>• <b className="text-foreground">{stats.eventosHoy.length}</b> evento{stats.eventosHoy.length !== 1 ? 's' : ''} en la agenda.</li>
+            </ul>
+          </div>
         </div>
 
-        {hasUrgent && (
+        {stats.eco && hasUrgent && (
           <div className="flex items-center gap-4 bg-rose-600 text-white px-6 py-4 rounded-2xl shadow-lg shadow-rose-600/20">
             <AlertTriangle className="h-5 w-5 shrink-0" />
             <p className="text-sm font-semibold flex-1">
               Tienes {stats.cobros.vencidasCount} factura{stats.cobros.vencidasCount !== 1 ? 's' : ''} vencida{stats.cobros.vencidasCount !== 1 ? 's' : ''} por {formatCurrency(stats.cobros.vencido)}.
             </p>
-            <Link href="/facturas" className="text-xs font-bold uppercase tracking-wide bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap">
-              Ver facturas
+            <Link href="/cobros" className="text-xs font-bold uppercase tracking-wide bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap">
+              Ver cobros
             </Link>
           </div>
         )}
       </div>
 
       {/* KPIs principales */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <KpiCard title="Facturado este mes" value={formatCurrency(stats.cobros.facturadoEsteMes)} icon={FileInput} href="/facturas" scheme="blue" />
-        <KpiCard title="Cobrado este mes" value={formatCurrency(stats.cobros.cobradoEsteMes)} icon={TrendingUp} href="/facturas" scheme="green" />
-        <KpiCard title="Pendiente de cobro" value={formatCurrency(stats.cobros.pendiente)} icon={Clock} href="/facturas" scheme="orange" />
-        <KpiCard title="Vencido" value={formatCurrency(stats.cobros.vencido)} subtitle={`${stats.cobros.vencidasCount} factura(s)`} icon={AlertTriangle} href="/facturas" scheme="red" />
-        <KpiCard title="Presupuestos pendientes" value={formatCurrency(stats.presupuestosPendientes.total)} subtitle={`${stats.presupuestosPendientes.count} por decidir`} icon={FileText} href="/presupuestos" scheme="purple" />
-      </div>
+      {stats.eco && (
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+          <KpiCard title="Facturado este mes" value={formatCurrency(stats.cobros.facturadoEsteMes)} icon={FileInput} href="/facturas" scheme="blue" />
+          <KpiCard title="Cobrado este mes" value={formatCurrency(stats.cobros.cobradoEsteMes)} icon={TrendingUp} href="/cobros" scheme="green" />
+          <KpiCard title="Pendiente de cobro" value={formatCurrency(stats.cobros.pendiente)} icon={Wallet} href="/cobros" scheme="orange" />
+          <KpiCard title="Vencido" value={formatCurrency(stats.cobros.vencido)} subtitle={`${stats.cobros.vencidasCount} factura(s)`} icon={AlertTriangle} href="/cobros" scheme="red" />
+          <KpiCard title="Vence esta semana" value={String(stats.cobros.venceSemana)} subtitle="facturas" icon={Clock} href="/cobros" scheme="orange" />
+          <KpiCard title="Parcialmente pagadas" value={String(stats.cobros.parciales)} subtitle={`${formatCurrency(stats.cobros.parcialesImporte)} pendiente`} icon={CircleDot} href="/cobros" scheme="slate" />
+          <KpiCard title="Presupuestos pendientes" value={formatCurrency(stats.presupuestosPendientes.total)} subtitle={`${stats.presupuestosPendientes.count} por decidir`} icon={FileText} href="/presupuestos" scheme="purple" />
+          <KpiCard title="Gastos este mes" value={formatCurrency(stats.gastosMes)} icon={Receipt} href="/gastos" scheme="slate" />
+        </div>
+      )}
 
       {/* Bloques operativos */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Acciones prioritarias: cobros pendientes y vencimientos próximos */}
+        {stats.eco && (
+          <div className="metric-card bg-card overflow-hidden lg:col-span-2">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-rose-50 dark:bg-rose-950/40 flex items-center justify-center">
+                  <Wallet className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+                </div>
+                <h3 className="text-base font-extrabold text-foreground">Cobros prioritarios y próximos vencimientos</h3>
+              </div>
+              <Link href="/cobros" className="text-xs font-bold text-primary flex items-center gap-1 hover:gap-1.5 transition-all">
+                Ver todo <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+            {stats.cobros.topPendientes.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">Nada vencido ni por vencer en 30 días. 🎉</p>
+            ) : (
+              <div className="divide-y divide-border">
+                {stats.cobros.topPendientes.map((f: any) => (
+                  <Link key={f.id} href={`/facturas?buscar=${encodeURIComponent(f.numero)}`} className="flex items-center justify-between gap-3 py-3 hover:bg-muted/40 -mx-2 px-2 rounded-lg transition-colors">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-foreground truncate">{f.cliente_razon_social}</p>
+                      <p className={cn("text-xs font-semibold", f.info.visual === 'vencida' ? 'text-rose-600' : f.info.visual === 'vence_hoy' ? 'text-orange-600' : 'text-amber-600')}>
+                        {f.info.visual === 'vencida' ? '🔴' : '🟡'} {f.numero} · {f.info.etiqueta}
+                      </p>
+                    </div>
+                    <MoneyDisplay value={f.info.pendiente} size="sm" />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Agenda de hoy */}
+        <div className="metric-card bg-card overflow-hidden">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-violet-50 dark:bg-violet-950/40 flex items-center justify-center">
+                <CalendarDays className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+              </div>
+              <h3 className="text-base font-extrabold text-foreground">Agenda de hoy</h3>
+            </div>
+            <Link href="/agenda" className="text-xs font-bold text-primary flex items-center gap-1">Abrir <ArrowRight className="h-3 w-3" /></Link>
+          </div>
+          {stats.eventosHoy.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">Sin citas para hoy.</p>
+          ) : (
+            <ul className="space-y-2">
+              {stats.eventosHoy.map((e: any) => (
+                <li key={e.id} className={cn("rounded-xl border px-3 py-2 text-sm", e.estado === 'completado' && 'opacity-50 line-through')}>
+                  <p className="font-bold">{e.todo_el_dia ? 'Todo el día' : new Date(e.inicio).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Madrid' })} · {e.titulo}</p>
+                  {e.contactos?.razon_social && <p className="text-xs text-muted-foreground">{e.contactos.razon_social}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         {/* Presupuestos pendientes de decisión */}
         <div className="metric-card bg-card overflow-hidden">
           <div className="flex items-center justify-between mb-6">
@@ -219,20 +290,23 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </div>
 
         {/* Acciones rápidas */}
-        <div className="metric-card bg-card">
+        <div className="metric-card bg-card lg:col-span-2">
           <h3 className="text-base font-extrabold text-foreground mb-6">Acciones rápidas</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <QuickAction href="/presupuestos/new" icon={FileText} label="Nuevo presupuesto" scheme="text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400" />
             <QuickAction href="/albaranes/new" icon={Box} label="Nuevo albarán" scheme="text-amber-600 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400" />
             <QuickAction href="/facturas/new" icon={FileInput} label="Nueva factura" scheme="text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400" />
             <QuickAction href="/gastos/new" icon={Receipt} label="Registrar gasto" scheme="text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400" />
-            <QuickAction href="/contactos" icon={Users} label="Clientes" scheme="text-slate-600 bg-slate-50 dark:bg-slate-800/60 dark:text-slate-300" />
-            <QuickAction href="https://t.me/ERP_PRUEBA_bot" icon={Send} label="Abrir Telegram" scheme="text-sky-600 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-400" external />
+            <QuickAction href="/cobros" icon={Wallet} label="Registrar cobro" scheme="text-green-700 bg-green-50 dark:bg-green-950/40 dark:text-green-400" />
+            <QuickAction href="/agenda?nuevo=1" icon={CalendarDays} label="Nuevo evento" scheme="text-violet-600 bg-violet-50 dark:bg-violet-950/40 dark:text-violet-400" />
+            <QuickAction href="/contactos?nuevo=1" icon={Users} label="Nuevo cliente" scheme="text-slate-600 bg-slate-50 dark:bg-slate-800/60 dark:text-slate-300" />
+            <QuickAction href="/ajustes#telegram" icon={Send} label="Telegram" scheme="text-sky-600 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-400" />
           </div>
         </div>
       </div>
 
-      {/* Chart & Insights Section */}
+      {/* Chart & Insights Section (solo con permisos económicos) */}
+      {stats.eco && (
       <div className="metric-card bg-card shadow-xl shadow-slate-200/20 dark:shadow-none overflow-hidden group">
         <div className="flex flex-row justify-between items-center mb-10">
           <div className="flex items-center gap-4">
@@ -254,6 +328,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <FinancialChart invoices={stats.chartData.facturas} expenses={stats.chartData.gastos} />
         </div>
       </div>
+      )}
 
       {/* Actividad reciente */}
       <div className="space-y-6">

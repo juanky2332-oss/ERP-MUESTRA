@@ -11,7 +11,11 @@ import {
     LogOut,
     Send,
     Bell,
+    Moon,
+    Sun,
 } from 'lucide-react'
+import { useTheme } from 'next-themes'
+import { AvisoCobros } from '@/components/cobros/aviso-cobros'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
@@ -28,7 +32,7 @@ import { QuickCreateMenu } from '@/components/layout/quick-create-menu'
 export function AppShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname()
     const router = useRouter()
-    const { monthYear, setMonthYear } = useGlobalFilter()
+    const { theme, setTheme } = useTheme()
 
     // Global Search State
     const [searchQuery, setSearchQuery] = useState('')
@@ -77,7 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {/* Main Content Area */}
             <div className="flex-1 flex flex-col min-w-0">
                 {/* Modern Header with Glassmorphism */}
-                <header className="h-16 md:h-20 glass sticky top-0 z-30 flex items-center justify-between px-4 md:px-8 border-b border-white/50 shadow-sm">
+                <header className="h-16 md:h-20 glass sticky top-0 z-30 flex items-center justify-between px-4 md:px-8 border-b border-border shadow-sm">
                     {/* Mobile Menu Toggle (Visible only on mobile) */}
                     <div className="md:hidden flex items-center gap-3">
                         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
@@ -104,7 +108,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                             <input
                                 type="text"
                                 placeholder="Busca cualquier documento o cliente..."
-                                className="w-full pl-12 pr-14 py-3 bg-slate-100/50 border border-slate-200/60 rounded-2xl text-sm font-medium focus:outline-none focus:ring-4 focus:ring-primary/5 focus:border-primary/40 focus:bg-white transition-all duration-300 placeholder:text-slate-400 shadow-sm"
+                                className="w-full pl-12 pr-14 py-3 bg-muted/60 border border-border rounded-2xl text-sm font-medium focus:outline-none focus:ring-4 focus:ring-primary/5 focus:border-primary/40 focus:bg-background transition-all duration-200 placeholder:text-muted-foreground shadow-sm"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 onFocus={() => {
@@ -177,10 +181,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         </div>
 
                         <Link
-                            href="https://t.me/ERP_PRUEBA_bot"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="Conectar/abrir el bot de Telegram del ERP"
+                            href="/ajustes#telegram"
+                            title="Conectar Telegram"
                             className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950/40 transition-colors"
                         >
                             <Send className="h-3.5 w-3.5" />
@@ -190,14 +192,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                             </span>
                         </Link>
 
-                        <Button variant="ghost" size="icon" className="rounded-xl relative text-slate-600" title="Notificaciones">
-                            <Bell className="h-4 w-4" />
+                        <Button variant="ghost" size="icon" className="rounded-xl text-muted-foreground" title="Cambiar tema claro/oscuro"
+                            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                            <Sun className="h-4 w-4 hidden dark:block" />
+                            <Moon className="h-4 w-4 dark:hidden" />
                         </Button>
+
+                        <Link href="/cobros" className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted" title="Cobros y vencimientos">
+                            <Bell className="h-4 w-4" />
+                        </Link>
 
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="gap-2 text-slate-600 hover:text-slate-900 rounded-xl"
+                            className="gap-2 text-muted-foreground hover:text-foreground rounded-xl"
                             onClick={async () => {
                                 const supabase = createClient()
                                 await supabase.auth.signOut()
@@ -211,7 +219,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     </div>
                 </header>
 
-                <main className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-8 lg:p-12 pb-24 md:pb-12 bg-slate-50/20">
+                <main className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-8 lg:p-10 pb-24 md:pb-12">
                     <div className="max-w-7xl mx-auto">
                         {children}
                     </div>
@@ -219,6 +227,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <MobileBottomNav />
+            <AvisoCobros />
         </div>
     )
 }

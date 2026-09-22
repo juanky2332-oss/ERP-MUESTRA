@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { CATEGORIAS_GASTO } from '@/lib/gastos/categorias'
 import { Textarea } from '@/components/ui/textarea'
 import { ChevronDown, ExternalLink, FileText, Loader2, Pencil, Save } from 'lucide-react'
 import { toast } from 'sonner'
@@ -53,6 +54,7 @@ interface FormState {
     iva_porcentaje: string
     iva_importe: string
     total: string
+    categoria: string
 }
 
 const num = (v: string | number | null | undefined) => {
@@ -74,6 +76,7 @@ function estadoInicial(gasto: Gasto): FormState {
         iva_porcentaje: String(gasto.iva_porcentaje ?? 21),
         iva_importe: String(gasto.iva_importe ?? 0),
         total: String(gasto.total ?? 0),
+        categoria: (gasto as any).categoria || '',
     }
 }
 
@@ -186,7 +189,8 @@ export function ExpenseEditDialog({ gasto, proveedores = [], onSave, isSaving }:
             iva_porcentaje: num(form.iva_porcentaje),
             iva_importe: num(form.iva_importe),
             total: num(form.total),
-        })
+            ...(form.categoria ? { categoria: form.categoria } : {}),
+        } as any)
 
         setOpen(false)
     }
@@ -302,6 +306,14 @@ export function ExpenseEditDialog({ gasto, proveedores = [], onSave, isSaving }:
                                 <Label htmlFor="edit-ref">Referencia pedido</Label>
                                 <Input id="edit-ref" value={form.referencia_pedido} onChange={e => set('referencia_pedido', e.target.value)} />
                             </div>
+                        </div>
+
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="edit-cat">Categoría</Label>
+                            <select id="edit-cat" className="h-9 rounded-md border bg-background px-3 text-sm" value={form.categoria} onChange={e => set('categoria', e.target.value)}>
+                                <option value="">Sin clasificar</option>
+                                {CATEGORIAS_GASTO.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
                         </div>
 
                         <div className="grid gap-1.5">

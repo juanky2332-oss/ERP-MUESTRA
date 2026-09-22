@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Search, Upload, Trash2, Loader2, FileText, PenLine, Users, Receipt, X, AlertTriangle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { CATEGORIAS_GASTO } from '@/lib/gastos/categorias'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import {
@@ -47,6 +48,7 @@ export default function GastosPage() {
 
     // Filtros propios del módulo de gastos
     const [proveedorFiltro, setProveedorFiltro] = useState<string>(TODOS)
+    const [categoriaFiltro, setCategoriaFiltro] = useState<string>('all')
     const [fechaDesde, setFechaDesde] = useState('')
     const [fechaHasta, setFechaHasta] = useState('')
 
@@ -91,6 +93,7 @@ export default function GastosPage() {
         fechaDesde,
         fechaHasta,
         proveedor: proveedorFiltro,
+        categoria: categoriaFiltro,
         sortConfig
     })
 
@@ -332,6 +335,17 @@ export default function GastosPage() {
             {/* Filtros */}
             <Card className="p-4 border-slate-200/60 shadow-sm">
                 <div className="flex flex-wrap items-end gap-4">
+                    <div className="grid gap-1.5">
+                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Categoría</Label>
+                        <Select value={categoriaFiltro} onValueChange={(v) => cambiarFiltro(() => setCategoriaFiltro(v))}>
+                            <SelectTrigger className="w-[200px] h-9 text-xs font-bold rounded-lg"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todas las categorías</SelectItem>
+                                <SelectItem value="__sin__">⚠️ Sin clasificar</SelectItem>
+                                {CATEGORIAS_GASTO.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
                     <div className="grid gap-1.5">
                         <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Proveedor</Label>
                         <Select value={proveedorFiltro} onValueChange={(v) => cambiarFiltro(() => setProveedorFiltro(v))}>

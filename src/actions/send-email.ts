@@ -1,108 +1,47 @@
 'use server'
 
-import nodemailer from 'nodemailer'
-import { createClient } from '@/lib/supabase/server'
+import { requirePermiso, mensajeError } from '@/lib/auth'
+import { enviarCorreo, getEmpresa, registrarEnvio } from '@/lib/email/mailer'
+import { auditar } from '@/lib/auditoria'
 
-// Credenciales desde env: GMAIL_USER y GMAIL_PASS (en Gmail usar "Contraseña de aplicación")
-function getMailCredentials() {
-    const user = process.env.GMAIL_USER
-    const pass = process.env.GMAIL_PASS
-    return { user, pass }
-}
-
-function getCorporateSignature() {
-    return `
-<br><br>
---<br>
-<b>EMPRESA X, S.L.</b><br>
-NIF: B00000000<br>
-Calle Ejemplo, 1<br>
-30000 - Ciudad Ejemplo (Murcia)<br>
-Email: administracion@empresax-demo.com<br>
-Tel: 600 000 000
-`
-}
-
+/** Envío manual desde la pantalla Emails (con adjuntos elegidos por el usuario). */
 export async function sendEmailAction(formData: FormData) {
-    const to = formData.get('to') as string
-    const cc = formData.get('cc') as string
-    const subject = formData.get('subject') as string
-    const html = formData.get('html') as string
-
-    // Attachments
-    const files = formData.getAll('attachments') as File[]
-
-    const { user, pass } = getMailCredentials()
-    if (!user || !pass) {
-        return {
-            success: false,
-            error: 'Credenciales de correo no configuradas. Configura GMAIL_USER y GMAIL_PASS en las variables de entorno.',
-        }
-    }
-
-    const transporter = nodemailer.createTransport({
-        host: "smtp.gmail.com",
-        port: 587,
-        secure: false, // true for 465, false for other ports
-        pool: true, // Use a pool of connections
-        maxConnections: 5,
-        maxMessages: 100,
-        connectionTimeout: 10000, // 10s
-        socketTimeout: 30000, // 30s
-        auth: {
-            user,
-            pass, // En Gmail debe ser "Contraseña de aplicación", no la contraseña normal
-        },
-    });
-
     try {
-        const attachments = await Promise.all(files.map(async (file) => {
-            const buffer = Buffer.from(await file.arrayBuffer())
-            return {
-                filename: file.name,
-                content: buffer
-            }
-        }))
+        const ctx = await requirePermiso('enviar')
+        const to = (formData.get('to') as string) || ''
+        const cc = (formData.get('cc') as string) || ''
+        const subject = (formData.get('subject') as string) || ''
+        const html = (formData.get('html') as string) || ''
+        const files = formData.getAll('attachments') as File[]
 
-        const finalHtml = `${html}${getCorporateSignature()}`
+        const total = files.reduce((a, f) => a + (f?.size || 0), 0)
+        if (total > 20 * 1024 * 1024) throw new Error('Los adjuntos superan 20 MB (límite de Gmail: 25 MB).')
 
-        await transporter.sendMail({
-            from: `"Empresa X" <${user}>`,
-            to,
-            cc,
-            subject,
-            html: finalHtml,
-            attachments
+        const attachments = await Promise.all(files.filter(f => f && f.size > 0).map(async (file) => ({
+            filename: file.name,
+            content: Buffer.from(await file.arrayBuffer()),
+            contentType: file.type || undefined,
+        })))
+
+        const empresa = await getEmpresa(ctx)
+        const res = await enviarCorreo({ to, cc, subject, cuerpo: html, esHtml: true, attachments }, empresa)
+
+        const tipoDoc = (formData.get('tipo_documento') as string) || 'Documento'
+        const numeroDoc = (formData.get('numero_documento') as string) || null
+        await registrarEnvio(ctx, {
+            destinatario: res.cc.length ? `${res.to.join(', ')} (CC: ${res.cc.join(', ')})` : res.to.join(', '),
+            tipo_documento: tipoDoc,
+            numero_documento: numeroDoc,
+            documento_id: (formData.get('documento_id') as string) || null,
+            pedido_referencia: (formData.get('pedido_referencia') as string) || null,
+            asunto: subject,
+            mensaje: html,
         })
-
-        // 3. Log to History (notificaciones_historial)
-        try {
-            const supabase = await createClient()
-            const tipoDoc = formData.get('tipo_documento') as string || 'Documento'
-            const numeroDoc = formData.get('numero_documento') as string || 'N/A'
-            const ref = formData.get('pedido_referencia') as string || ''
-
-            await supabase.from('notificaciones_historial').insert({
-                remitente: 'Empresa X',
-                destinatario: cc ? `${to} (CC: ${cc})` : to,
-                tipo_documento: tipoDoc,
-                numero_documento: numeroDoc,
-                pedido_referencia: ref,
-                asunto: subject,
-                mensaje: html,
-                usuario_nombre: 'ADMIN' // Default for now
-            })
-        } catch (logError) {
-            console.warn('Could not log to notificaciones_historial:', logError)
-        }
+        await auditar(ctx, 'correo_enviado', { tipo: tipoDoc.toLowerCase(), ref: numeroDoc }, { to: res.to, cc: res.cc, asunto: subject, adjuntos: attachments.map(a => a.filename) })
 
         return { success: true }
-    } catch (error: any) {
+    } catch (error) {
         console.error('Email send error:', error)
-        let message = error?.message || String(error)
-        if (message.includes('Username and Password') || message.includes('BadCredentials') || message.includes('535')) {
-            message = 'Gmail no aceptó el usuario/contraseña. Comprueba GMAIL_USER y GMAIL_PASS en las variables de entorno y que uses una Contraseña de aplicación de Google, no la contraseña normal.'
-        }
-        return { success: false, error: message }
+        return { success: false, error: mensajeError(error) }
     }
 }

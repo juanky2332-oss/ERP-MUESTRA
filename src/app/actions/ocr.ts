@@ -1,6 +1,7 @@
 'use server'
 
 import OpenAI from 'openai'
+import { getContexto } from '@/lib/auth'
 import { REGLAS_PARTES } from '@/lib/ocr-prompts'
 
 const openai = new OpenAI({
@@ -9,6 +10,7 @@ const openai = new OpenAI({
 
 export async function processDocumentWithOCR(formData: FormData) {
     try {
+        await getContexto()
         const file = formData.get('file') as File
         const type = formData.get('type') as string // 'gasto' | 'albaran_firmado'
 

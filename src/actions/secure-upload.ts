@@ -1,14 +1,19 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
-import { processDocumentWithOCR } from '@/actions/ocr'
+import { getContexto, assertPermiso, mensajeError } from '@/lib/auth'
+import { leerDocumentoConIA } from '@/lib/ocr/leer'
+import { subirArchivo } from '@/lib/archivos-servidor'
+import { vincularProveedor } from '@/lib/gastos/servidor'
+import { auditar } from '@/lib/auditoria'
 import { storeDocumentEmbedding } from '@/lib/ai/embeddings'
 import { revalidatePath } from 'next/cache'
 import { getNextSequenceNumber } from '@/lib/sequences'
 import { PROVEEDOR_PENDIENTE, resolveDocumentClient, resolveExpenseSupplier } from '@/lib/expense-supplier'
 
 export async function uploadSignedAlbaranAction(formData: FormData) {
-    const supabase = await createClient()
+    let ctx
+    try { ctx = await getContexto(); assertPermiso(ctx, 'documentos') } catch (e) { return { success: false, error: mensajeError(e) } }
+    const supabase = ctx.supabase
     const file = formData.get('file') as File
 
     if (!file) {
@@ -16,26 +21,15 @@ export async function uploadSignedAlbaranAction(formData: FormData) {
     }
 
     try {
-        // 1. Upload to 'gastos' bucket (known to work) instead of 'albaranes' (which returns RLS error)
+        // 1. Subida privada a la carpeta de la empresa
         const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
         const filename = `signed_${Date.now()}_${sanitizedName}`
+        const buffer = Buffer.from(await file.arrayBuffer())
+        const subido = await subirArchivo(ctx, 'albaranes-firmados', 'albaranes', buffer, file.type || 'application/octet-stream', file.name.split('.').pop() || 'pdf')
+        const publicUrl = subido.url
 
-        const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('gastos') // Using 'gastos' bucket as a shared bucket for docs if albaranes fails
-            .upload(filename, file)
-
-        if (uploadError) {
-            console.error('Storage Upload Error:', uploadError)
-            return { success: false, error: `Error subiendo archivo: ${uploadError.message}` }
-        }
-
-        // 2. Get Public URL
-        const { data: { publicUrl } } = supabase.storage
-            .from('gastos')
-            .getPublicUrl(filename)
-
-        // 3. Process with OCR
-        const ocrResult = await processDocumentWithOCR(publicUrl)
+        // 2. OCR directamente sobre el contenido (sin URLs públicas)
+        const ocrResult = await leerDocumentoConIA(buffer, file.type || '')
 
         if (!ocrResult.success) {
             return { success: false, error: `Error OCR: ${ocrResult.error}` }
@@ -69,7 +63,7 @@ export async function uploadSignedAlbaranAction(formData: FormData) {
             .from('albaranes')
             .select('numero')
             .eq('numero', documentNumber)
-            .single()
+            .maybeSingle()
 
         if (existing) {
             // Number exists, append timestamp to make it unique
@@ -126,7 +120,9 @@ type ProcessExpenseResult =
     | { success: false; error: string }
 
 export async function processExpense(formData: FormData): Promise<ProcessExpenseResult> {
-    const supabase = await createClient()
+    let ctx
+    try { ctx = await getContexto(); assertPermiso(ctx, 'gastos') } catch (e) { return { success: false, error: mensajeError(e) } }
+    const supabase = ctx.supabase
     const file = formData.get('file') as File
 
     if (!file) {
@@ -137,21 +133,13 @@ export async function processExpense(formData: FormData): Promise<ProcessExpense
         const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
         const filename = `expense_${Date.now()}_${sanitizedName}`
 
-        // 1. Upload to Storage
-        const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('gastos')
-            .upload(filename, file)
+        // 1. Subida privada a la carpeta de la empresa
+        const buffer = Buffer.from(await file.arrayBuffer())
+        const subido = await subirArchivo(ctx, 'gastos', 'gastos', buffer, file.type || 'application/octet-stream', file.name.split('.').pop() || 'pdf')
+        const publicUrl = subido.url
 
-        if (uploadError) {
-            return { success: false, error: `Error subiendo archivo: ${uploadError.message}` }
-        }
-
-        const { data: { publicUrl } } = supabase.storage
-            .from('gastos')
-            .getPublicUrl(filename)
-
-        // 2. OCR
-        const ocrResult = await processDocumentWithOCR(publicUrl)
+        // 2. OCR directamente sobre el contenido
+        const ocrResult = await leerDocumentoConIA(buffer, file.type || '')
         if (!ocrResult.success) {
             return { success: false, error: `Error OCR: ${ocrResult.error}` }
         }
@@ -196,6 +184,10 @@ export async function processExpense(formData: FormData): Promise<ProcessExpense
                 ? (Number(ocrData.base_imponible) || 0) + (Number(ocrData.iva_importe) || 0)
                 : (Number(ocrData.total) || 0),
             factura_url: publicUrl,
+            archivo_url: publicUrl,
+            proveedor_id: await vincularProveedor(ctx, supplier.proveedor, supplier.proveedor_cif),
+            origen: 'app',
+            revisado: !supplier.revisar,
             // Se escriben las dos columnas: 'referencia_pedido' es la que muestra
             // el listado y 'referencia' se mantiene por compatibilidad histórica.
             referencia_pedido: referencia,
@@ -207,13 +199,16 @@ export async function processExpense(formData: FormData): Promise<ProcessExpense
             },
         }
 
-        const { error: dbError } = await supabase
+        const { data: gastoCreado, error: dbError } = await supabase
             .from('gastos')
             .insert(payload)
+            .select('id, numero, total')
+            .single()
 
         if (dbError) {
             return { success: false, error: `Error guardando gasto: ${dbError.message}` }
         }
+        await auditar(ctx, 'gasto_registrado', { tipo: 'gasto', id: gastoCreado.id, ref: gastoCreado.numero }, { proveedor: supplier.proveedor, total: gastoCreado.total, origen: 'ocr' })
 
         revalidatePath('/gastos')
         return {

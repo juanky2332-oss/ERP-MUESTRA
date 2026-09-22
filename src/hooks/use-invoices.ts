@@ -107,15 +107,16 @@ export function useInvoices({
             if (error) throw error
 
             // 3. Stats (Total Facturado, Total Cobrado) - Respecting Date Filter
-            let statsQuery = supabase.from('facturas').select('total, statuses')
+            let statsQuery = supabase.from('facturas').select('total, statuses, importe_cobrado, anulada')
 
             if (start && end) {
                 statsQuery = statsQuery.gte('fecha', start).lte('fecha', end)
             }
             const { data: statsData } = await statsQuery
 
-            const totalFacturado = statsData?.reduce((acc, curr) => acc + (curr.total || 0), 0) || 0
-            const totalCobrado = statsData?.filter(r => r.statuses?.includes('pagada')).reduce((acc, curr) => acc + (curr.total || 0), 0) || 0
+            const vivas = (statsData || []).filter((r: any) => !r.anulada)
+            const totalFacturado = vivas.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0)
+            const totalCobrado = vivas.reduce((acc: number, curr: any) => acc + (Number(curr.importe_cobrado) || 0), 0)
 
             return {
                 items: pageData as Factura[],

@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { supabase } from '@/lib/supabase'
 import { processDocumentWithOCR } from '@/app/actions/ocr'
+import { subirArchivoPrivado } from '@/lib/archivos-cliente'
 import { ingestDocument } from '@/actions/ingest-document'
 import { toast } from 'sonner'
 import { Loader2, Upload, ScanLine, Save, ArrowLeft } from 'lucide-react'
@@ -136,38 +137,28 @@ export default function NewGastoPage() {
                     return
                 }
 
-                const fileExt = mimeToExt[file.type]
-                const fileName = `gasto_${Date.now()}_${Math.random().toString(36).slice(2)}.${fileExt}`
-
-                const { error: uploadError } = await supabase.storage
-                    .from('gastos')
-                    .upload(fileName, file, {
-                        contentType: file.type,
-                        upsert: false,
-                    })
-
-                if (uploadError) {
+                try {
+                    fileUrl = await subirArchivoPrivado('gastos', file, 'gasto')
+                } catch (uploadError) {
                     console.error('Upload error', uploadError)
-                    toast.warning('No se pudo subir la imagen al bucket, pero se guardará el registro.')
-                } else {
-                    const { data: publicURL } = supabase.storage.from('gastos').getPublicUrl(fileName)
-                    fileUrl = publicURL.publicUrl
+                    toast.warning('No se pudo subir el archivo, pero se guardará el registro.')
                 }
             }
 
-            const { error: dbError } = await supabase.from('gastos').insert({
+            const { createExpense } = await import('@/actions/expenses')
+            const res = await createExpense({
                 fecha: values.fecha,
                 proveedor: values.proveedor,
+                proveedor_cif: values.ocr_data?.proveedor_cif || values.ocr_data?.emisor_cif || null,
                 concepto: values.concepto,
                 base_imponible: values.base_imponible,
                 iva_porcentaje: values.iva_porcentaje,
                 iva_importe: values.iva_importe,
                 total: values.total,
                 ocr_data: values.ocr_data,
-                archivo_url: fileUrl
+                archivo_url: fileUrl || null,
             })
-
-            if (dbError) throw dbError
+            if (!res.success) throw new Error((res.error as any)?.message || 'No se pudo guardar el gasto')
 
             if (fileUrl) {
                 const ocrText = values.ocr_data?.raw_text || values.concepto || ''

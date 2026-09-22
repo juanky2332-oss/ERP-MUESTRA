@@ -62,6 +62,8 @@ export interface ExpenseFilters {
     fechaHasta?: string
     /** Proveedor exacto por el que filtrar ('all' = todos) */
     proveedor?: string
+    /** Categoría ('all' = todas, '__sin__' = sin clasificar) */
+    categoria?: string
     sortConfig?: { key: string, direction: 'asc' | 'desc' } | null
 }
 
@@ -150,7 +152,7 @@ export function useExpenses(filters: ExpenseFilters = {}) {
 
     // --- 1. Listado paginado (aplica TODOS los filtros, incluido proveedor) ---
     const { data, isLoading } = useQuery({
-        queryKey: ['gastos', 'lista', page, pageSize, proveedor, sortConfig, ...filterKey],
+        queryKey: ['gastos', 'lista', page, pageSize, proveedor, filters.categoria, sortConfig, ...filterKey],
         queryFn: async () => {
             let query = applyCommonFilters(
                 supabase.from('gastos').select('*', { count: 'exact' }),
@@ -159,6 +161,11 @@ export function useExpenses(filters: ExpenseFilters = {}) {
 
             if (proveedor && proveedor !== 'all') {
                 query = query.eq('proveedor', proveedor)
+            }
+            if (filters.categoria === '__sin__') {
+                query = query.is('categoria', null)
+            } else if (filters.categoria && filters.categoria !== 'all') {
+                query = query.eq('categoria', filters.categoria)
             }
 
             if (sortConfig) {
@@ -270,6 +277,9 @@ export function useExpenses(filters: ExpenseFilters = {}) {
             // sincronizadas para que la ficha y el listado muestren lo mismo.
             if (resto.descripcion !== undefined) {
                 payload.concepto = resto.descripcion
+            }
+            if ((resto as any).categoria !== undefined) {
+                payload.revisado = true
             }
             if (resto.referencia_pedido !== undefined) {
                 payload.referencia = resto.referencia_pedido

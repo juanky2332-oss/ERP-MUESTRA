@@ -1,8 +1,18 @@
+import 'server-only'
 import { OpenAI } from "openai"
-import { startOfMonth, endOfMonth, subMonths } from "date-fns"
-import { getNextSequenceNumber } from "@/lib/sequences"
+import type { Contexto } from "@/lib/auth"
+import { tienePermiso } from "@/lib/permisos"
+import { ejecutarLectura, formatEuro } from "@/lib/ai/herramientas-lectura"
+import { buscarDocumentoPorNumero, emailsDeCliente, NOMBRE, type TipoDocumento } from "@/lib/documentos/servidor"
+import { crearAccion, describirAccion, ejecutarAccion, cancelarAccion, ultimaAccionPendiente, type Accion } from "@/lib/acciones/servidor"
+import { resumenCobros, borradorReclamacion, conInfo, CAMPOS_FACTURA_COBRO } from "@/lib/cobros/servidor"
+import { hoyISO, etiquetaMetodo, METODOS_PAGO, offsetMadrid, rangoDiaMadrid } from "@/lib/cobros/vencimientos"
+import { CATEGORIAS_GASTO } from "@/lib/gastos/servidor"
+import { registrarUsoIA, comprobarCupoIA } from "@/lib/ai/uso"
+import { auditar } from "@/lib/auditoria"
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const MODELO = process.env.OPENAI_MODEL_CHAT || 'gpt-4o'
 
 export interface ChatMessage {
     role: "system" | "user" | "assistant" | "tool"
@@ -10,757 +20,478 @@ export interface ChatMessage {
     [key: string]: any
 }
 
-// Schema Definition for Chatbot Context
-const DB_SCHEMA = `
-CRITICAL: DATABASE STRUCTURE (READ CAREFULLY)
-
-1. TABLE 'facturas'
-   - Columns: id, numero (string), fecha (date), cliente_id, cliente_razon_social, cliente_email, total (number), estado ('PENDIENTE','PAGADA','ENVIADA'), pagada (bool), enviada (bool), statuses (array text e.g. ['pagada','enviado']), pedido_referencia, descripcion, base_imponible, iva_porcentaje, iva_importe, fecha_vencimiento, created_at.
-
-2. TABLE 'presupuestos'
-   - Columns: id, numero, fecha, cliente_id, cliente_razon_social, total, estado ('borrador','enviado','aceptado'), aceptado (bool), rechazado (bool), pedido_referencia, descripcion, base_imponible, iva_porcentaje, statuses (array; 'traspasado' significa que YA se convirtió en albarán y por tanto ya NO está pendiente de decisión), created_at.
-
-3. TABLE 'albaranes'
-   - Columns: id, numero, fecha, cliente_id, cliente_razon_social, total, estado ('pendiente','facturado'), pedido_referencia, descripcion, base_imponible, statuses (array), documento_firmado_url, es_enviado, created_at.
-
-4. TABLE 'albaranes' — also contains albaranes firmados (signed) when 'documento_firmado_url' is NOT null.
-   - Columns: id, numero, fecha, cliente_id, cliente_razon_social, total, estado, pedido_referencia, descripcion, base_imponible, statuses, documento_firmado_url (URL of the signed PDF, null if not signed), es_enviado (bool), estado_vida ('Pendiente','Traspasado'), created_at.
-   - To get signed/firmados: filter WHERE documento_firmado_url IS NOT NULL
-
-5. TABLE 'gastos'
-   - Columns: id, fecha, numero, proveedor, referencia_pedido, descripcion, base_imponible, iva_importe, total, factura_url, created_at.
-
-6. TABLE 'notificaciones_historial' (EMAIL LOGS)
-   - Columns: id, destinatario, email_destinatario, tipo_documento, numero_documento, asunto, created_at.
-
-7. TABLE 'contactos' (CLIENTS)
-   - Columns: id, razon_social, email, telefono, cif, direccion, ciudad, codigo_postal, provincia, notas, total_facturado.
-`
-
-const tools = [
-    {
-        type: "function",
-        function: {
-            name: "get_all_documents",
-            description: "Obtener una lista de documentos (facturas, presupuestos, albaranes). Úsalo también cuando pregunten por totales de un mes específico de estos documentos. Soporta rangos de fecha personalizados con date_from y date_to.",
-            parameters: {
-                type: "object",
-                properties: {
-                    document_type: { type: "string", enum: ["all", "factura", "presupuesto", "albaran"] },
-                    client_name: { type: "string", description: "Filtrar por nombre de cliente" },
-                    status: { type: "string", description: "Filtrar por estado exacto (ej: 'PENDIENTE', 'PAGADA', 'ENVIADA')" },
-                    paid_only: { type: "boolean", description: "Si true, devuelve SOLO facturas cobradas/pagadas (pagada=true O statuses contiene 'pagada'). Úsalo cuando pregunten por 'cobrado', 'pagado', 'facturación cobrada'." },
-                    period: { type: "string", enum: ["this_month", "last_month", "this_year", "all_time", "custom_month", "custom_range"], description: "Filtrar por fecha. Usar 'custom_range' cuando se especifiquen fechas exactas con date_from y date_to." },
-                    year: { type: "number", description: "Año si period='custom_month'" },
-                    month: { type: "number", description: "Mes si period='custom_month'" },
-                    date_from: { type: "string", description: "Fecha de inicio en formato YYYY-MM-DD para rango personalizado (custom_range)" },
-                    date_to: { type: "string", description: "Fecha de fin en formato YYYY-MM-DD para rango personalizado (custom_range)" },
-                    limit: { type: "number", description: "Número de resultados (max 200, default 200 para obtener todos y calcular totales exactos)" }
-                }
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "get_financial_summary",
-            description: "Obtener resumen financiero general (total facturado, cobrado, pendiente, gastos, beneficios). Soporta rangos personalizados con date_from y date_to.",
-            parameters: {
-                type: "object",
-                properties: {
-                    period: { type: "string", enum: ["this_month", "last_month", "this_year", "all_time", "custom_month", "custom_range"] },
-                    year: { type: "number" },
-                    month: { type: "number" },
-                    date_from: { type: "string", description: "Fecha inicio YYYY-MM-DD" },
-                    date_to: { type: "string", description: "Fecha fin YYYY-MM-DD" }
-                }
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "get_client_information",
-            description: "Obtener información completa de un cliente: facturas, presupuestos, albaranes, gastos, etc.",
-            parameters: {
-                type: "object",
-                properties: {
-                    client_name: { type: "string", description: "Nombre parcial o completo del cliente" }
-                },
-                required: ["client_name"]
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "get_contacts",
-            description: "Buscar contactos/clientes en la agenda.",
-            parameters: {
-                type: "object",
-                properties: {
-                    search: { type: "string" },
-                    limit: { type: "number" }
-                }
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "get_gastos",
-            description: "Obtener gastos/facturas de proveedores.",
-            parameters: {
-                type: "object",
-                properties: {
-                    period: { type: "string", enum: ["this_month", "last_month", "this_year", "all_time", "custom_month", "custom_range"] },
-                    year: { type: "number" },
-                    month: { type: "number" },
-                    date_from: { type: "string", description: "Fecha inicio YYYY-MM-DD" },
-                    date_to: { type: "string", description: "Fecha fin YYYY-MM-DD" },
-                    proveedor: { type: "string" },
-                    search: { type: "string" },
-                    limit: { type: "number" }
-                }
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "get_albaranes_firmados",
-            description: "Obtener albaranes firmados digitalizados.",
-            parameters: {
-                type: "object",
-                properties: {
-                    client_name: { type: "string" },
-                    status: { type: "string", enum: ["Pendiente", "Traspasado"] },
-                    period: { type: "string", enum: ["this_month", "last_month", "this_year", "all_time", "custom_month", "custom_range"] },
-                    year: { type: "number" },
-                    month: { type: "number" },
-                    date_from: { type: "string", description: "Fecha inicio YYYY-MM-DD" },
-                    date_to: { type: "string", description: "Fecha fin YYYY-MM-DD" },
-                    limit: { type: "number" }
-                }
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "get_email_history",
-            description: "Consultar historial de correos enviados a clientes.",
-            parameters: {
-                type: "object",
-                properties: {
-                    client_name: { type: "string" },
-                    document_type: { type: "string", enum: ["factura", "presupuesto", "albaran"] },
-                    limit: { type: "number" }
-                }
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "get_pending_items",
-            description: "Obtener elementos pendientes de acción.",
-            parameters: {
-                type: "object",
-                properties: {
-                    item_type: { type: "string", enum: ["all", "unpaid_invoices"] }
-                }
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "search_documents",
-            description: "Buscar por texto libre en todos los documentos.",
-            parameters: {
-                type: "object",
-                properties: {
-                    query: { type: "string" }
-                },
-                required: ["query"]
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "previsualizar_presupuesto",
-            description: "Calcula (SIN GUARDAR NADA) cómo quedaría un presupuesto: totales, IVA y si el cliente existe. Llama SIEMPRE a esta función primero cuando el usuario pida crear un presupuesto, incluso si ya te ha dado todos los datos. Nunca escribe en la base de datos.",
-            parameters: {
-                type: "object",
-                properties: {
-                    client_name: { type: "string", description: "Nombre del cliente, debe existir ya como contacto en el sistema" },
-                    lineas: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                descripcion: { type: "string" },
-                                cantidad: { type: "number" },
-                                precio_unitario: { type: "number", description: "Precio unitario SIN IVA" }
-                            },
-                            required: ["descripcion", "cantidad", "precio_unitario"]
-                        }
-                    },
-                    iva_porcentaje: { type: "number", description: "Por defecto 21 si no se indica" },
-                    observaciones: { type: "string" }
-                },
-                required: ["client_name", "lineas"]
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "crear_presupuesto_confirmado",
-            description: "Crea el presupuesto DE VERDAD en el sistema (acción irreversible). SOLO se puede llamar inmediatamente después de que el usuario, en SU ÚLTIMO MENSAJE (el más reciente, no uno antiguo), haya respondido afirmativamente (sí, confirmo, adelante, dale, créalo...) a una previsualización que TÚ le mostraste antes con previsualizar_presupuesto. Si el último mensaje del usuario no es una confirmación clara y explícita, NO llames a esta función: vuelve a previsualizar o pregunta.",
-            parameters: {
-                type: "object",
-                properties: {
-                    client_name: { type: "string" },
-                    lineas: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                descripcion: { type: "string" },
-                                cantidad: { type: "number" },
-                                precio_unitario: { type: "number" }
-                            },
-                            required: ["descripcion", "cantidad", "precio_unitario"]
-                        }
-                    },
-                    iva_porcentaje: { type: "number" },
-                    observaciones: { type: "string" }
-                },
-                required: ["client_name", "lineas"]
-            }
-        }
-    }
-]
-
-function getDateRange(period: string, year?: number, month?: number, date_from?: string, date_to?: string) {
-    const now = new Date()
-    let start: Date, end: Date
-
-    if (period === 'custom_range' && date_from && date_to) {
-        start = new Date(date_from + 'T00:00:00')
-        end = new Date(date_to + 'T23:59:59')
-    } else if (period === 'this_month') {
-        start = startOfMonth(now)
-        end = endOfMonth(now)
-    } else if (period === 'last_month') {
-        const lastMonth = subMonths(now, 1)
-        start = startOfMonth(lastMonth)
-        end = endOfMonth(lastMonth)
-    } else if (period === 'custom_month' && year && month) {
-        const customDate = new Date(year, month - 1, 1)
-        start = startOfMonth(customDate)
-        end = endOfMonth(customDate)
-    } else if (period === 'this_year') {
-        start = new Date(now.getFullYear(), 0, 1)
-        end = new Date(now.getFullYear(), 11, 31, 23, 59, 59)
-    } else {
-        start = new Date(2000, 0, 1)
-        end = now
-    }
-    return { start, end }
+export interface RespuestaAsistente {
+    texto: string
+    /** Acción preparada que el usuario debe confirmar con un botón. */
+    accion?: { id: string; tipo: string; resumen: string } | null
+    /** Resultado de una acción ejecutada en este turno. */
+    ejecutada?: { ok: boolean; mensaje: string } | null
 }
 
-const formatEuro = (amount: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount)
+const DB_SCHEMA = `
+ESTRUCTURA DE DATOS (resumen)
+- facturas: numero, fecha, fecha_vencimiento, cliente_razon_social, total, importe_cobrado, estado_cobro ('pendiente','parcial','pagada'), statuses, forma_pago, metodo_pago, anulada.
+- cobros: pagos de facturas (importe, fecha, metodo, origen, estado).
+- presupuestos: numero, fecha, fecha_validez, cliente_razon_social, total, statuses ('traspasado' = ya convertido en albarán), aceptado, rechazado.
+- albaranes: numero, fecha, cliente_razon_social, total, statuses, documento_firmado_url (firmados).
+- gastos: fecha, numero, proveedor, categoria, base_imponible, iva_importe, total.
+- contactos (clientes): razon_social, email, email_facturacion, telefono, cif, metodo_pago, condiciones de pago.
+- notificaciones_historial: correos enviados.
+- eventos: agenda (citas, llamadas, visitas, recordatorios...).
+- catalogo: productos, materiales y servicios con precio de venta e IVA.`
 
-const SYSTEM_PROMPT = `Eres el asistente inteligente del ERP de Empresa X.
+const lecturaTools = [
+    {
+        type: "function", function: {
+            name: "get_all_documents",
+            description: "Lista documentos (facturas, presupuestos, albaranes) con filtros de fecha, cliente y estado. También para totales de un periodo.",
+            parameters: {
+                type: "object", properties: {
+                    document_type: { type: "string", enum: ["all", "factura", "presupuesto", "albaran"] },
+                    client_name: { type: "string" },
+                    status: { type: "string" },
+                    paid_only: { type: "boolean", description: "Solo facturas cobradas del todo" },
+                    period: { type: "string", enum: ["this_month", "last_month", "this_year", "all_time", "custom_month", "custom_range"] },
+                    year: { type: "number" }, month: { type: "number" },
+                    date_from: { type: "string" }, date_to: { type: "string" },
+                    limit: { type: "number" }
+                }
+            }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "get_financial_summary",
+            description: "Resumen financiero: facturado, cobrado, pendiente, gastos y beneficio de un periodo.",
+            parameters: { type: "object", properties: { period: { type: "string", enum: ["this_month", "last_month", "this_year", "all_time", "custom_month", "custom_range"] }, year: { type: "number" }, month: { type: "number" }, date_from: { type: "string" }, date_to: { type: "string" } } }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "get_client_information",
+            description: "Todo sobre un cliente: datos, facturas, presupuestos, albaranes, correos.",
+            parameters: { type: "object", properties: { client_name: { type: "string" } }, required: ["client_name"] }
+        }
+    },
+    { type: "function", function: { name: "get_contacts", description: "Buscar clientes.", parameters: { type: "object", properties: { search: { type: "string" }, limit: { type: "number" } } } } },
+    {
+        type: "function", function: {
+            name: "get_gastos", description: "Gastos y facturas de proveedores.",
+            parameters: { type: "object", properties: { period: { type: "string", enum: ["this_month", "last_month", "this_year", "all_time", "custom_month", "custom_range"] }, year: { type: "number" }, month: { type: "number" }, date_from: { type: "string" }, date_to: { type: "string" }, proveedor: { type: "string" }, search: { type: "string" }, limit: { type: "number" } } }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "get_albaranes_firmados", description: "Albaranes firmados digitalizados.",
+            parameters: { type: "object", properties: { client_name: { type: "string" }, status: { type: "string", enum: ["Pendiente", "Traspasado"] }, period: { type: "string", enum: ["this_month", "last_month", "this_year", "all_time", "custom_month", "custom_range"] }, year: { type: "number" }, month: { type: "number" }, date_from: { type: "string" }, date_to: { type: "string" }, limit: { type: "number" } } }
+        }
+    },
+    { type: "function", function: { name: "get_email_history", description: "Historial de correos enviados a clientes.", parameters: { type: "object", properties: { client_name: { type: "string" }, document_type: { type: "string" }, limit: { type: "number" } } } } },
+    { type: "function", function: { name: "search_documents", description: "Búsqueda libre en todos los documentos y clientes.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } } },
+    {
+        type: "function", function: {
+            name: "get_cobros_vencimientos",
+            description: "Cobros pendientes y vencimientos: facturas vencidas, que vencen pronto, parciales, cobrado del mes. Úsalo para '¿qué me deben?', '¿qué está vencido?', '¿qué vence esta semana?'.",
+            parameters: { type: "object", properties: { filtro: { type: "string", enum: ["vencidas", "vencen_pronto", "pendientes", "parciales", "resumen"] }, dias: { type: "number", description: "Para vencen_pronto: horizonte en días (3, 7, 15, 30)" }, client_name: { type: "string" } } }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "get_agenda",
+            description: "Eventos de agenda (citas, llamadas, visitas, recordatorios) y vencimientos entre dos fechas.",
+            parameters: { type: "object", properties: { desde: { type: "string", description: "YYYY-MM-DD" }, hasta: { type: "string", description: "YYYY-MM-DD" } }, required: ["desde", "hasta"] }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "buscar_catalogo",
+            description: "Busca productos, materiales o servicios del catálogo (con precio de venta e IVA). Úsalo antes de proponer líneas de presupuesto.",
+            parameters: { type: "object", properties: { texto: { type: "string" } }, required: ["texto"] }
+        }
+    },
+]
 
-════════════════════════════════════════════
-🔴 LEY NÚMERO 1 — OBLIGATORIO SIEMPRE
-════════════════════════════════════════════
-ANTE CUALQUIER PREGUNTA SOBRE DATOS (facturas, importes, clientes, fechas, estados, totales, documentos):
-→ PRIMERO llama al tool correspondiente.
-→ LUEGO lee el resultado LITERALMENTE tal como viene de la base de datos.
-→ SOLO ENTONCES responde.
+const accionTools = [
+    {
+        type: "function", function: {
+            name: "preparar_envio_documento",
+            description: "Prepara el ENVÍO POR CORREO de una factura, presupuesto o albarán con su PDF adjunto. No envía nada: deja la acción lista para que el usuario la confirme. Úsalo SIEMPRE que pidan mandar/enviar/reenviar un documento por email.",
+            parameters: {
+                type: "object", properties: {
+                    tipo_documento: { type: "string", enum: ["factura", "presupuesto", "albaran"] },
+                    numero: { type: "string", description: "Número tal como lo diga el usuario (FAC-01-2026, 'fac 01', '42'...)" },
+                    client_name: { type: "string", description: "Cliente, si lo menciona (ayuda a desambiguar)" },
+                    destinatarios: { type: "array", items: { type: "string" }, description: "Solo si el usuario da emails concretos. Si no, se usa el email del cliente." },
+                    cc: { type: "array", items: { type: "string" } },
+                    asunto: { type: "string" },
+                    mensaje: { type: "string", description: "Cuerpo del correo en texto plano, sin firma (la firma de la empresa se añade sola). Si el usuario pide un texto concreto, redáctalo aquí." }
+                }, required: ["tipo_documento", "numero"]
+            }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "preparar_cobro",
+            description: "Prepara el registro de un COBRO de una factura (pagada entera o pago parcial). No registra nada hasta que el usuario confirme.",
+            parameters: {
+                type: "object", properties: {
+                    numero_factura: { type: "string" },
+                    importe: { type: "number", description: "Solo si es un pago parcial o el usuario dice un importe. Si dice 'está pagada', omítelo (se cobra todo lo pendiente)." },
+                    metodo: { type: "string", enum: METODOS_PAGO.map(m => m.value) },
+                    fecha: { type: "string", description: "YYYY-MM-DD, por defecto hoy" },
+                    nota: { type: "string" }
+                }, required: ["numero_factura"]
+            }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "preparar_reclamacion_pago",
+            description: "Prepara un correo de RECLAMACIÓN de pago de una factura pendiente o vencida, usando la plantilla de la empresa. No envía hasta confirmar.",
+            parameters: { type: "object", properties: { numero_factura: { type: "string" }, mensaje: { type: "string", description: "Solo si el usuario quiere un texto distinto al de la plantilla" } }, required: ["numero_factura"] }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "preparar_gasto",
+            description: "Prepara un GASTO con los datos que el usuario ha dado (texto o audio). NO inventes importes, IVA ni proveedor: si falta el total pregúntalo antes. No guarda hasta confirmar.",
+            parameters: {
+                type: "object", properties: {
+                    proveedor: { type: "string" }, fecha: { type: "string" }, concepto: { type: "string" },
+                    base_imponible: { type: "number" }, iva_porcentaje: { type: "number" }, iva_importe: { type: "number" }, total: { type: "number" },
+                    categoria: { type: "string", enum: [...CATEGORIAS_GASTO] }
+                }, required: ["total"]
+            }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "previsualizar_presupuesto",
+            description: "Prepara un PRESUPUESTO BORRADOR (calcula totales, comprueba el cliente). No guarda nada hasta que el usuario confirme. No inventes precios: usa el catálogo o lo que diga el usuario.",
+            parameters: {
+                type: "object", properties: {
+                    client_name: { type: "string" },
+                    lineas: { type: "array", items: { type: "object", properties: { descripcion: { type: "string" }, cantidad: { type: "number" }, precio_unitario: { type: "number", description: "Sin IVA" } }, required: ["descripcion", "cantidad", "precio_unitario"] } },
+                    iva_porcentaje: { type: "number" },
+                    observaciones: { type: "string" },
+                    dias_validez: { type: "number" }
+                }, required: ["client_name", "lineas"]
+            }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "crear_evento_agenda",
+            description: "Crea un evento en la agenda (cita, llamada, reunión, visita, recordatorio...). Pregunta la fecha/hora si no la tienes.",
+            parameters: {
+                type: "object", properties: {
+                    titulo: { type: "string" },
+                    tipo: { type: "string", enum: ["cita", "reunion", "llamada", "visita", "entrega", "recordatorio", "cobro_previsto", "pago_previsto", "seguimiento_presupuesto", "otro"] },
+                    inicio: { type: "string", description: "YYYY-MM-DDTHH:mm (hora de Madrid) o YYYY-MM-DD si es todo el día" },
+                    duracion_minutos: { type: "number" },
+                    client_name: { type: "string" },
+                    notas: { type: "string" }
+                }, required: ["titulo", "inicio"]
+            }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "confirmar_accion_pendiente",
+            description: "Ejecuta la acción que TÚ preparaste antes (envío, cobro, gasto, presupuesto), SOLO si el último mensaje del usuario es una confirmación clara ('sí', 'envíalo', 'confirmo', 'adelante'). Nunca en el mismo turno en que la preparas.",
+            parameters: { type: "object", properties: {} }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "cancelar_accion_pendiente",
+            description: "Cancela la acción preparada si el usuario dice que no, que la cancele o que no la envíe.",
+            parameters: { type: "object", properties: {} }
+        }
+    },
+]
 
-PROHIBIDO responder sobre datos sin haber llamado al tool antes.
-PROHIBIDO asumir, inferir o recordar datos de conversaciones anteriores.
-PROHIBIDO inventar ningún número, fecha, estado o documento.
+const SYSTEM_PROMPT = `Eres ARIA, la asistente del ERP de {{EMPRESA}}. Hablas con {{USUARIO}} (rol: {{ROL}}).
 
-════════════════════════════════════════════
-🔴 LEY NÚMERO 2 — LEE LOS DATOS EXACTOS
-════════════════════════════════════════════
-Cada documento en la base de datos tiene campos exactos. Léelos SIN interpretarlos:
+REGLA 1 — DATOS: ante cualquier pregunta sobre datos, llama primero a la herramienta. Nunca inventes números, fechas, estados, clientes, proveedores, productos, importes ni IVA. Usa los totales que calcula el sistema; no sumes tú.
 
-▸ FECHA → usa el campo "fecha" exactamente como está. No la cambies.
-▸ ESTADO → lee el campo "estado" tal cual: 'PENDIENTE', 'PAGADA', 'ENVIADA', etc.
-▸ PAGADA → lee el campo booleano "pagada": true = cobrada, false = no cobrada.
-▸ STATUSES → lee el array "statuses": si contiene 'pagada' = cobrada. Si un PRESUPUESTO contiene 'traspasado' = ya se convirtió en albarán, YA NO está pendiente de decisión aunque aceptado/rechazado estén en false.
-▸ TOTAL → usa el número exacto del campo "total". No redondees. No sumes tú.
+REGLA 2 — ACCIONES REALES: tú NO puedes enviar correos, registrar cobros, crear gastos ni presupuestos directamente. Para eso tienes herramientas "preparar_*" que dejan la acción lista y la interfaz muestra al usuario un resumen con botones Confirmar / Cancelar.
+- Cuando pidan enviar/mandar un documento por correo → preparar_envio_documento. Si piden un texto concreto (p. ej. "formal, pidiendo que confirmen la recepción"), redáctalo tú en 'mensaje' con tono profesional: saludo formal ('Estimados señores:'), cuerpo claro y despedida ('Un cordial saludo.'), sin firma (la firma de la empresa se añade sola). Usa el número de documento completo (p. ej. FAC-01-2026). Nunca uses marcadores tipo [Tu nombre].
+- "La factura X está pagada" / "han pagado 300 € de la X" → preparar_cobro.
+- "Reclama la factura X" → preparar_reclamacion_pago.
+- Gasto dictado → preparar_gasto (si falta el total o el IVA, pregunta UNA sola cosa).
+- Presupuesto → previsualizar_presupuesto (busca antes en el catálogo si hay productos).
+Después de preparar, responde en 1-2 frases diciendo qué has preparado y pide confirmación. NO repitas todo el resumen (ya lo ve con los botones). NUNCA digas "procederé a enviarlo", "enviaré" o "ya está enviado" si no has recibido de la herramienta un resultado con ok=true.
+- Si el usuario confirma por texto ("sí", "envíalo", "ok"), llama a confirmar_accion_pendiente y comunica EXACTAMENTE el mensaje que devuelva.
+- Si una herramienta devuelve error o varias coincidencias, explícalo y pregunta.
 
-Si una factura tiene fecha 2025-05-07, estado PENDIENTE y pagada=false:
-→ ES PENDIENTE. No está cobrada. Punto.
+REGLA 3 — PREGUNTAS: si falta un dato, haz UNA sola pregunta clara (por ejemplo "He encontrado dos clientes con ese nombre, ¿cuál?").
 
-Si una factura tiene pagada=true o statuses=['pagada']:
-→ ESTÁ COBRADA. Punto.
-
-NUNCA asumas que una factura está pagada porque "tiene fecha antigua" o "parece que sí".
-NUNCA asumas que está pendiente porque "parece reciente".
-LEE EL CAMPO. RESPONDE LO QUE DICE EL CAMPO.
-
-════════════════════════════════════════════
-🔴 LEY NÚMERO 3 — TOTALES EXACTOS DEL SISTEMA
-════════════════════════════════════════════
-NUNCA sumes tú mismo los importes.
-USA SIEMPRE los campos que devuelve el sistema:
-- "total_importe_exacto_calculado_por_sistema"
-- "total_facturado", "cobrado", "total_gastos"
-- "importe_pagadas", "importe_pendientes"
-
-════════════════════════════════════════════
-🔴 LEY NÚMERO 4 — NO CEDES ANTE EL USUARIO
-════════════════════════════════════════════
-Si el usuario dice "pero yo creo que son X€" y los datos dicen Y€:
-→ Responde: "Según los datos exactos del sistema, el importe es Y€. No X€."
-→ No cedas. No digas "puede que tengas razón". Los datos mandan.
-
-Si el usuario insiste con una cifra incorrecta, repite los datos reales.
-
-════════════════════════════════════════════
-📄 CREACIÓN DE DOCUMENTOS — PROCESO EN DOS PASOS OBLIGATORIO
-════════════════════════════════════════════
-Crear un presupuesto es una acción real e irreversible. SIEMPRE en dos pasos, NUNCA en uno:
-
-PASO 1 — Cuando el usuario pida crear un presupuesto (aunque te dé todos los datos en el mismo mensaje):
-→ Llama a previsualizar_presupuesto (no guarda nada).
-→ Si falta el cliente o las líneas, PREGÚNTALO antes de llamar a la tool; no inventes cantidades ni precios.
-→ Con el resultado, muestra al usuario un resumen claro (cliente, líneas, IVA, total) y pregúntale explícitamente: "¿Confirmas que lo cree?".
-→ TERMINA tu respuesta ahí. No llames a crear_presupuesto_confirmado en este mismo turno.
-
-PASO 2 — Solo en un turno POSTERIOR, si el ÚLTIMO mensaje del usuario es una confirmación clara ("sí", "confirmo", "adelante", "créalo", "dale"):
-→ Ahora sí, llama a crear_presupuesto_confirmado con los mismos datos ya previsualizados.
-→ Confirma el número de presupuesto generado y el total.
-
-Si el último mensaje del usuario NO es una confirmación explícita (es una pregunta, un cambio de tema, o datos nuevos), vuelve a previsualizar_presupuesto, nunca llames directamente a crear_presupuesto_confirmado.
-
-════════════════════════════════════════════
-📌 CÓMO INTERPRETAR PREGUNTAS DE DATOS
-════════════════════════════════════════════
-
-"¿Cuánto hemos COBRADO de X?" / "facturación cobrada" / "lo que nos han PAGADO"
-→ get_all_documents con client_name=X, document_type='factura', paid_only=true
-→ Filtra SOLO facturas con pagada=true O statuses contiene 'pagada'
-→ NUNCA incluir ENVIADAS o PENDIENTES
-
-"¿Cuánto hemos FACTURADO a X?" / "facturas emitidas" / "total facturado"
-→ get_all_documents con client_name=X, document_type='factura', SIN paid_only
-→ Incluye TODAS las facturas
-
-"¿Qué facturas tiene PENDIENTES X?" / "qué nos deben"
-→ get_all_documents con client_name=X, status='PENDIENTE'
-→ O get_pending_items
-
-DIFERENCIA CRÍTICA: FACTURADO ≠ COBRADO ≠ ENVIADO
-- ENVIADA = se mandó la factura, NO significa cobrada
-- PAGADA = está cobrada
-- PENDIENTE = no cobrada, no enviada aún
-
-════════════════════════════════════════════
-📅 FECHAS Y RANGOS PERSONALIZADOS
-════════════════════════════════════════════
-Cuando el usuario diga fechas concretas ("desde el 13/03", "entre enero y abril", "hasta hoy"):
-→ period='custom_range', date_from='YYYY-MM-DD', date_to='YYYY-MM-DD'
-→ "Hasta hoy" = {{HOY_ISO}}
-→ "Desde X sin fecha fin" → date_to = {{HOY_ISO}}
-
-Convierte siempre fechas en español a formato YYYY-MM-DD antes de llamar al tool.
-Ejemplos: "13 de marzo" → "2025-03-13" | "07 de mayo" → "2025-05-07"
-
-════════════════════════════════════════════
-✅ HERRAMIENTAS DISPONIBLES
-════════════════════════════════════════════
-get_all_documents      → Facturas, presupuestos, albaranes (con filtros de fecha, cliente, estado, paid_only)
-get_financial_summary  → Resumen financiero del período
-get_client_information → Todo sobre un cliente
-get_contacts           → Agenda de clientes
-get_gastos             → Gastos y facturas de proveedores
-get_albaranes_firmados → Albaranes con firma digital
-get_email_history      → Historial de correos enviados
-get_pending_items      → Elementos pendientes de acción
-search_documents       → Búsqueda libre en todos los documentos
-previsualizar_presupuesto     → Paso 1: calcula un presupuesto sin guardar nada
-crear_presupuesto_confirmado  → Paso 2: crea el presupuesto de verdad, solo tras confirmación explícita
-
-════════════════════════════════════════════
-📋 FORMATO DE RESPUESTA
-════════════════════════════════════════════
-- MONEDA: Euros (€), cifra exacta del sistema, sin redondear.
-- FECHAS: Formato español dd/mes/año al mostrar, YYYY-MM-DD al filtrar.
-- IDIOMA: Castellano profesional.
-- TOTALES: Muestra siempre qué filtros aplicaste (período, cliente, solo pagadas, etc.).
-- Si no hay datos: "No se han encontrado registros con esos criterios."
-- Emojis solo para estructura, no decorativos.
+FORMATO: castellano profesional, conciso (esto se lee también en Telegram). Importes en euros con formato español. Fechas dd/mm/aaaa. Puedes usar **negrita** con moderación.
 
 ${DB_SCHEMA}
 
-Fecha actual: {{HOY_LARGO}}
-Fecha ISO: {{HOY_ISO}}`
+Hoy es {{HOY_LARGO}} ({{HOY_ISO}}).`
 
-async function executeTool(supabase: any, name: string, args: any): Promise<any> {
-    // 1. GET ALL DOCUMENTS (FACTURAS, PRESUPUESTOS, ALBARANES)
-    if (name === 'get_all_documents') {
-        const docType = args.document_type || 'all'
-        const limit = args.limit || 200
-        const period = args.period || 'all_time'
-        const { start, end } = getDateRange(period, args.year, args.month, args.date_from, args.date_to)
-        let allDocs: any[] = []
+const CONFIRMA_RE = /^(s[ií]+|sip|vale|ok(ay)?|okey|dale|adelante|confirm[oa]r?|conforme|correcto|de acuerdo|perfecto|hazlo|env[ií]a(lo|la|r)?|m[aá]nda(lo|la|r)?|cr[eé]a(lo|la|r)?|reg[ií]stra(lo|la|r)?|gu[aá]rda(lo|la|r)?|m[aá]rca(la|lo|r)?)\b/i
+const CANCELA_RE = /^(no\b|cancela|cancelar|anula|d[ée]jalo|olv[ií]dalo|no lo env[ií]es|para\b)/i
 
-        const applyFilters = (query: any) => {
-            if (args.client_name) query = query.ilike('cliente_razon_social', `%${args.client_name}%`)
-            if (args.status) query = query.eq('estado', args.status)
-            if (period !== 'all_time') query = query.gte('fecha', start.toISOString()).lte('fecha', end.toISOString())
-            return query
-        }
-
-        if (docType === 'factura' || docType === 'all') {
-            let query = supabase.from('facturas').select('*').order('fecha', { ascending: false }).limit(limit)
-            query = applyFilters(query)
-            if (args.paid_only === true) query = query.or('pagada.eq.true,statuses.cs.{"pagada"}')
-            const { data } = await query
-            allDocs.push(...(data || []).map((d: any) => ({ ...d, type: 'FACTURA' })))
-        }
-        if (docType === 'presupuesto' || docType === 'all') {
-            let query = supabase.from('presupuestos').select('*').order('fecha', { ascending: false }).limit(limit)
-            const { data } = await applyFilters(query)
-            allDocs.push(...(data || []).map((d: any) => ({ ...d, type: 'PRESUPUESTO' })))
-        }
-        if (docType === 'albaran' || docType === 'all') {
-            let query = supabase.from('albaranes').select('*').order('fecha', { ascending: false }).limit(limit)
-            const { data } = await applyFilters(query)
-            allDocs.push(...(data || []).map((d: any) => ({ ...d, type: 'ALBARAN' })))
-        }
-
-        const finalDocs = allDocs.slice(0, limit)
-        const totalImporte = finalDocs.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0)
-        const facturasDocs = finalDocs.filter(d => d.type === 'FACTURA')
-        const pagadas = facturasDocs.filter(d => d.pagada === true || (Array.isArray(d.statuses) && d.statuses.includes('pagada')))
-        const pendientes = facturasDocs.filter(d => !d.pagada && !(Array.isArray(d.statuses) && d.statuses.includes('pagada')))
-
-        return {
-            filtros_aplicados: {
-                cliente: args.client_name || 'todos', periodo: period,
-                date_from: args.date_from || null, date_to: args.date_to || null,
-                solo_pagadas: args.paid_only === true, estado: args.status || null
-            },
-            total_importe_exacto_calculado_por_sistema: formatEuro(totalImporte),
-            numero_de_documentos: finalDocs.length,
-            desglose_facturas: facturasDocs.length > 0 ? {
-                total_facturas: facturasDocs.length,
-                pagadas: pagadas.length,
-                importe_pagadas: formatEuro(pagadas.reduce((acc, d) => acc + (Number(d.total) || 0), 0)),
-                pendientes: pendientes.length,
-                importe_pendientes: formatEuro(pendientes.reduce((acc, d) => acc + (Number(d.total) || 0), 0))
-            } : null,
-            documents: finalDocs
-        }
-    }
-
-    // 2. GET FINANCIAL SUMMARY
-    if (name === 'get_financial_summary') {
-        const period = args.period || 'this_month'
-        const { start, end } = getDateRange(period, args.year, args.month, args.date_from, args.date_to)
-
-        const { data: facturas } = await supabase.from('facturas').select('total, estado, pagada, statuses').gte('fecha', start.toISOString()).lte('fecha', end.toISOString())
-        const { data: gastos } = await supabase.from('gastos').select('total, base_imponible, iva_importe').gte('fecha', start.toISOString()).lte('fecha', end.toISOString())
-        const { data: presupuestos } = await supabase.from('presupuestos').select('total').gte('fecha', start.toISOString()).lte('fecha', end.toISOString())
-
-        const totalFacturado = facturas?.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0) || 0
-        const cobrado = facturas?.filter((f: any) => f.statuses?.includes('pagada') || f.pagada === true).reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0) || 0
-        const pendiente = totalFacturado - cobrado
-        const totalGastos = gastos?.reduce((acc: number, curr: any) => acc + (Number(curr.total) || (Number(curr.base_imponible || 0) + Number(curr.iva_importe || 0)) || 0), 0) || 0
-        const totalPresupuestos = presupuestos?.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0) || 0
-
-        return {
-            period, date_from: args.date_from || start.toISOString().split('T')[0], date_to: args.date_to || end.toISOString().split('T')[0],
-            total_facturado: formatEuro(totalFacturado), cobrado: formatEuro(cobrado), pendiente_cobro: formatEuro(pendiente),
-            total_gastos: formatEuro(totalGastos), beneficio_neto: formatEuro(cobrado - totalGastos),
-            presupuestos_emitidos: formatEuro(totalPresupuestos),
-            num_facturas: facturas?.length || 0, num_presupuestos: presupuestos?.length || 0, num_gastos: gastos?.length || 0
-        }
-    }
-
-    // 3. GET CLIENT INFORMATION
-    if (name === 'get_client_information') {
-        const clientName = args.client_name
-        let contacto: any = null
-        try {
-            const { data: c } = await supabase.from('contactos').select('*').ilike('razon_social', `%${clientName}%`).limit(1).single()
-            contacto = c
-        } catch { }
-
-        const [{ data: facturas }, { data: presupuestos }, { data: albaranes }, { data: albFirmados }, { data: gastos }, { data: emails }] = await Promise.all([
-            supabase.from('facturas').select('id, numero, fecha, total, estado, pagada, statuses, pedido_referencia').ilike('cliente_razon_social', `%${clientName}%`).order('fecha', { ascending: false }).limit(50),
-            supabase.from('presupuestos').select('id, numero, fecha, total, estado, pedido_referencia').ilike('cliente_razon_social', `%${clientName}%`).order('fecha', { ascending: false }).limit(10),
-            supabase.from('albaranes').select('id, numero, fecha, total, estado, pedido_referencia').ilike('cliente_razon_social', `%${clientName}%`).order('fecha', { ascending: false }).limit(10),
-            supabase.from('albaranes').select('id, numero, fecha, total, estado_vida, pedido_referencia').ilike('cliente_razon_social', `%${clientName}%`).not('documento_firmado_url', 'is', null).order('fecha', { ascending: false }).limit(10),
-            supabase.from('gastos').select('id, numero, fecha, total, proveedor, descripcion').ilike('proveedor', `%${clientName}%`).order('fecha', { ascending: false }).limit(5),
-            supabase.from('notificaciones_historial').select('*').or(`destinatario.ilike.%${clientName}%,asunto.ilike.%${clientName}%`).order('created_at', { ascending: false }).limit(5)
-        ] as any)
-
-        const totalFacturado = facturas?.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0) || 0
-        const totalCobrado = facturas?.filter((f: any) => f.pagada === true || (Array.isArray(f.statuses) && f.statuses.includes('pagada'))).reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0) || 0
-        const totalPendiente = totalFacturado - totalCobrado
-
-        return {
-            contact_info: contacto || null,
-            resumen_financiero: {
-                total_facturado: formatEuro(totalFacturado), total_cobrado: formatEuro(totalCobrado), total_pendiente: formatEuro(totalPendiente),
-                num_facturas_pagadas: facturas?.filter((f: any) => f.pagada === true || (Array.isArray(f.statuses) && f.statuses.includes('pagada'))).length || 0,
-                num_facturas_pendientes: facturas?.filter((f: any) => !f.pagada && !(Array.isArray(f.statuses) && f.statuses.includes('pagada'))).length || 0
-            },
-            num_facturas: facturas?.length || 0, num_presupuestos: presupuestos?.length || 0, num_albaranes: albaranes?.length || 0,
-            num_albaranes_firmados: (albFirmados as any[])?.length || 0,
-            recent_invoices: facturas?.slice(0, 10) || [], recent_budgets: presupuestos?.slice(0, 5) || [],
-            recent_albaranes: albaranes?.slice(0, 5) || [], recent_albaranes_firmados: albFirmados?.slice(0, 5) || [], recent_emails: emails || []
-        }
-    }
-
-    // 4. GET CONTACTS
-    if (name === 'get_contacts') {
-        let query = supabase.from('contactos').select('*').order('razon_social', { ascending: true })
-        if (args.search) query = query.or(`razon_social.ilike.%${args.search}%,email.ilike.%${args.search}%,cif.ilike.%${args.search}%,telefono.ilike.%${args.search}%`)
-        query = query.limit(args.limit || 20)
-        const { data } = await query
-        return { total: data?.length || 0, contacts: data || [] }
-    }
-
-    // 5. GET GASTOS
-    if (name === 'get_gastos') {
-        const period = args.period || 'all_time'
-        const { start, end } = getDateRange(period, args.year, args.month, args.date_from, args.date_to)
-        let query = supabase.from('gastos').select('*').order('fecha', { ascending: false })
-        if (period !== 'all_time') query = query.gte('fecha', start.toISOString()).lte('fecha', end.toISOString())
-        if (args.proveedor) query = query.ilike('proveedor', `%${args.proveedor}%`)
-        if (args.search) query = query.or(`proveedor.ilike.%${args.search}%,descripcion.ilike.%${args.search}%,numero.ilike.%${args.search}%`)
-        query = query.limit(args.limit || 200)
-        const { data } = await query
-        const totalGastos = data?.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0) || 0
-        return { total_gastos_exacto_calculado_por_sistema: formatEuro(totalGastos), num_gastos: data?.length || 0, gastos: data || [] }
-    }
-
-    // 6. GET ALBARANES FIRMADOS
-    if (name === 'get_albaranes_firmados') {
-        let query = supabase.from('albaranes').select('*').not('documento_firmado_url', 'is', null).order('fecha', { ascending: false })
-        if (args.client_name) query = query.ilike('cliente_razon_social', `%${args.client_name}%`)
-        if (args.status) query = query.eq('estado_vida', args.status)
-        if (args.period && args.period !== 'all_time') {
-            const { start, end } = getDateRange(args.period, args.year, args.month, args.date_from, args.date_to)
-            query = query.gte('fecha', start.toISOString()).lte('fecha', end.toISOString())
-        }
-        query = query.limit(args.limit || 200)
-        const { data, error } = await query
-        if (error) return { error: 'Error: ' + error.message }
-        const totalAmount = data?.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0) || 0
-        return { total_importe_exacto_calculado_por_sistema: formatEuro(totalAmount), num_albaranes_firmados: data?.length || 0, albaranes_firmados: data || [] }
-    }
-
-    // 7. GET EMAIL HISTORY
-    if (name === 'get_email_history') {
-        let query = supabase.from('notificaciones_historial').select('*').order('created_at', { ascending: false })
-        if (args.client_name) query = query.or(`destinatario.ilike.%${args.client_name}%,asunto.ilike.%${args.client_name}%`)
-        if (args.document_type) query = query.eq('tipo_documento', args.document_type)
-        query = query.limit(args.limit || 10)
-        const { data } = await query
-        return { total_emails: data?.length || 0, emails: data || [] }
-    }
-
-    // 8. GET PENDING ITEMS
-    if (name === 'get_pending_items') {
-        const { data: unpaid } = await supabase.from('facturas').select('*').neq('estado', 'PAGADA').neq('pagada', true)
-        return {
-            unpaid_invoices: unpaid || [],
-            total_unpaid_amount_exacto: formatEuro(unpaid?.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0) || 0)
-        }
-    }
-
-    // 9. SEARCH DOCUMENTS
-    if (name === 'search_documents') {
-        const query = args.query
-        const [{ data: facturas }, { data: presupuestos }, { data: albaranes }, { data: gastos }, { data: contactos }, albFirmadosResult] = await Promise.all([
-            supabase.from('facturas').select('*').or(`numero.ilike.%${query}%,cliente_razon_social.ilike.%${query}%,pedido_referencia.ilike.%${query}%`).order('fecha', { ascending: false }).limit(10),
-            supabase.from('presupuestos').select('*').or(`numero.ilike.%${query}%,cliente_razon_social.ilike.%${query}%,pedido_referencia.ilike.%${query}%`).order('fecha', { ascending: false }).limit(10),
-            supabase.from('albaranes').select('*').or(`numero.ilike.%${query}%,cliente_razon_social.ilike.%${query}%,pedido_referencia.ilike.%${query}%`).order('fecha', { ascending: false }).limit(10),
-            supabase.from('gastos').select('*').or(`numero.ilike.%${query}%,proveedor.ilike.%${query}%,descripcion.ilike.%${query}%,referencia_pedido.ilike.%${query}%`).order('fecha', { ascending: false }).limit(10),
-            supabase.from('contactos').select('*').or(`razon_social.ilike.%${query}%,email.ilike.%${query}%,cif.ilike.%${query}%,telefono.ilike.%${query}%`).limit(10),
-            supabase.from('albaranes').select('*').not('documento_firmado_url', 'is', null).or(`numero.ilike.%${query}%,cliente_razon_social.ilike.%${query}%,pedido_referencia.ilike.%${query}%`).order('fecha', { ascending: false }).limit(10)
-        ] as any)
-
-        return {
-            totales_exactos_calculados_por_sistema: {
-                facturas: formatEuro(facturas?.reduce((a: number, c: any) => a + (Number(c.total) || 0), 0) || 0),
-                presupuestos: formatEuro(presupuestos?.reduce((a: number, c: any) => a + (Number(c.total) || 0), 0) || 0),
-                albaranes: formatEuro(albaranes?.reduce((a: number, c: any) => a + (Number(c.total) || 0), 0) || 0),
-                gastos: formatEuro(gastos?.reduce((a: number, c: any) => a + (Number(c.total) || 0), 0) || 0)
-            },
-            facturas: facturas || [], presupuestos: presupuestos || [], albaranes: albaranes || [], gastos: gastos || [],
-            contactos: contactos || [], albaranes_firmados: albFirmadosResult?.data || []
-        }
-    }
-
-    // 10. PREVISUALIZAR PRESUPUESTO (paso 1 — nunca escribe en la base de datos)
-    if (name === 'previsualizar_presupuesto') {
-        const { data: contacto } = await supabase.from('contactos').select('id, razon_social, cif').ilike('razon_social', `%${args.client_name}%`).limit(1).maybeSingle()
-        if (!contacto) {
-            return { existe_cliente: false, error: `No existe ningún cliente que coincida con "${args.client_name}". Debe darse de alta primero en el ERP (sección Clientes) antes de poder crear un presupuesto para él.` }
-        }
-
-        const { base, ivaPct, ivaImporte, total } = computePresupuestoTotals(args)
-
-        return {
-            existe_cliente: true,
-            cliente: contacto.razon_social,
-            lineas: args.lineas,
-            base_imponible_exacta: formatEuro(base),
-            iva_porcentaje: ivaPct,
-            iva_importe_exacto: formatEuro(ivaImporte),
-            total_exacto: formatEuro(total),
-            guardado: false,
-            instruccion_para_el_modelo: "Esto es solo una previsualización, NO se ha guardado nada. Resume esto al usuario y pregúntale si confirma. No llames a crear_presupuesto_confirmado en este mismo turno."
-        }
-    }
-
-    // 11. CREAR PRESUPUESTO CONFIRMADO (paso 2 — acción real e irreversible)
-    if (name === 'crear_presupuesto_confirmado') {
-        const { data: contacto } = await supabase.from('contactos').select('*').ilike('razon_social', `%${args.client_name}%`).limit(1).maybeSingle()
-        if (!contacto) {
-            return { error: `No existe ningún cliente que coincida con "${args.client_name}".` }
-        }
-
-        const { lineas, base, ivaPct, ivaImporte, total } = computePresupuestoTotals(args)
-        const numero = await getNextSequenceNumber('presupuesto', supabase)
-
-        const { data: inserted, error } = await supabase.from('presupuestos').insert({
-            numero,
-            fecha: new Date().toISOString(),
-            cliente_id: contacto.id,
-            cliente_razon_social: contacto.razon_social,
-            cliente_cif: contacto.cif,
-            cliente_direccion: contacto.direccion,
-            cliente_telefono: contacto.telefono,
-            cliente_email: contacto.email,
-            lineas,
-            subtotal: base,
-            base_imponible: base,
-            iva_porcentaje: ivaPct,
-            iva_importe: ivaImporte,
-            total,
-            observaciones: args.observaciones || 'Creado desde el asistente IA (Telegram/chat)',
-            statuses: ['pendiente'],
-            estado_vida: 'Pendiente',
-        }).select('id, numero, total').single()
-
-        if (error) return { error: `No se pudo crear el presupuesto: ${error.message}` }
-
-        return {
-            creado: true,
-            numero: inserted.numero,
-            total_exacto: formatEuro(Number(inserted.total)),
-            mensaje: `Presupuesto ${inserted.numero} creado correctamente por ${formatEuro(Number(inserted.total))}.`
-        }
-    }
-
-    return { error: `Herramienta desconocida: ${name}` }
+export function esConfirmacion(texto: string) {
+    const t = (texto || '').trim()
+    return t.length <= 60 && CONFIRMA_RE.test(t) && !/\?$/.test(t)
+}
+export function esCancelacion(texto: string) {
+    const t = (texto || '').trim()
+    return t.length <= 40 && CANCELA_RE.test(t)
 }
 
-function computePresupuestoTotals(args: any) {
-    const lineas = (args.lineas || []).map((l: any) => ({
-        descripcion: l.descripcion,
-        cantidad: Number(l.cantidad) || 1,
-        precio_unitario: Number(l.precio_unitario) || 0,
-    }))
-    const base = lineas.reduce((acc: number, l: any) => acc + l.cantidad * l.precio_unitario, 0)
-    const ivaPct = Number(args.iva_porcentaje) || 21
-    const ivaImporte = Math.round(base * (ivaPct / 100) * 100) / 100
-    const total = Math.round((base + ivaImporte) * 100) / 100
-    return { lineas, base, ivaPct, ivaImporte, total }
+function accionPublica(a: Accion) {
+    return { id: a.id, tipo: a.tipo, resumen: a.resumen }
 }
 
-/** Ejecuta el asistente ERP (mismo motor que usa el widget de chat web) sobre una conversación dada. */
-export async function runErpAssistant(supabase: any, messages: ChatMessage[]): Promise<string> {
-    const systemContent = SYSTEM_PROMPT
-        .replaceAll('{{HOY_ISO}}', new Date().toISOString().split('T')[0])
-        .replaceAll('{{HOY_LARGO}}', new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }))
+const r2 = (n: number) => Math.round(n * 100) / 100
 
-    const first = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [{ role: "system", content: systemContent }, ...messages] as any,
-        tools: tools as any,
-        tool_choice: "required",
-    })
+async function elegirDocumento(ctx: Contexto, tipo: TipoDocumento, numero: string, cliente?: string) {
+    let docs = await buscarDocumentoPorNumero(ctx, tipo, numero)
+    if (cliente && docs.length > 1) {
+        const c = cliente.toLowerCase()
+        const filtrados = docs.filter(d => (d.cliente_razon_social || '').toLowerCase().includes(c))
+        if (filtrados.length) docs = filtrados
+    }
+    return docs
+}
 
-    const message = first.choices[0].message
+async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimoUsuario: string, estado: { accion: Accion | null; ejecutada: any }): Promise<any> {
+    switch (name) {
+        case 'get_cobros_vencimientos': {
+            if (!tienePermiso(ctx.rol, 'economico') && !tienePermiso(ctx.rol, 'ver')) return { error: 'Sin permiso' }
+            const r = await resumenCobros(ctx)
+            let lista = args.filtro === 'vencidas' ? r.vencidas
+                : args.filtro === 'vencen_pronto' ? r.proximas.filter(f => (f.info.dias ?? 999) <= (args.dias || 7)).concat(r.venceHoy)
+                    : args.filtro === 'parciales' ? r.parciales
+                        : r.pendientes
+            if (args.client_name) lista = lista.filter(f => f.cliente_razon_social.toLowerCase().includes(String(args.client_name).toLowerCase()))
+            return {
+                resumen: {
+                    pendiente_total: formatEuro(r.pendienteTotal), vencido_total: formatEuro(r.vencidoTotal), num_vencidas: r.vencidas.length,
+                    vencen_hoy: r.venceHoy.length, vencen_esta_semana: r.venceEstaSemana, cobrado_este_mes: formatEuro(r.cobradoEsteMes), parciales: r.parciales.length,
+                },
+                facturas: lista.slice(0, 40).map(f => ({ numero: f.numero, cliente: f.cliente_razon_social, total: formatEuro(f.info.total), cobrado: formatEuro(f.info.cobrado), pendiente: formatEuro(f.info.pendiente), vencimiento: f.fecha_vencimiento, situacion: f.info.etiqueta })),
+            }
+        }
+        case 'get_agenda': {
+            const { data: eventos } = await ctx.supabase.from('eventos').select('titulo, tipo, estado, inicio, fin, todo_el_dia, notas, direccion, cliente_id').gte('inicio', rangoDiaMadrid(args.desde).desde).lte('inicio', rangoDiaMadrid(args.hasta).hasta).order('inicio')
+            const { data: venc } = await ctx.supabase.from('facturas').select('numero, cliente_razon_social, fecha_vencimiento, total, importe_cobrado').gte('fecha_vencimiento', args.desde).lte('fecha_vencimiento', args.hasta).neq('estado_cobro', 'pagada')
+            return { eventos: eventos || [], vencimientos_facturas: (venc || []).map((f: any) => ({ numero: f.numero, cliente: f.cliente_razon_social, vence: f.fecha_vencimiento, pendiente: formatEuro(Number(f.total) - Number(f.importe_cobrado || 0)) })) }
+        }
+        case 'buscar_catalogo': {
+            const t = String(args.texto || '').trim()
+            const { data } = await ctx.supabase.from('catalogo').select('nombre, referencia, tipo, descripcion, unidad, precio_venta, iva_porcentaje, categoria').eq('activo', true)
+                .or(`nombre.ilike.%${t}%,referencia.ilike.%${t}%,descripcion.ilike.%${t}%,categoria.ilike.%${t}%`).limit(15)
+            return { resultados: data || [], nota: (data || []).length ? undefined : 'No hay productos que coincidan en el catálogo. No inventes precios: pregunta al usuario.' }
+        }
+        case 'preparar_envio_documento': {
+            if (!tienePermiso(ctx.rol, 'enviar')) return { error: 'Tu rol no permite enviar correos a clientes.' }
+            const tipo = args.tipo_documento as TipoDocumento
+            const docs = await elegirDocumento(ctx, tipo, args.numero, args.client_name)
+            if (docs.length === 0) return { error: `No encuentro ningún ${NOMBRE[tipo].toLowerCase()} con número "${args.numero}".` }
+            if (docs.length > 1) return { varias_coincidencias: docs.slice(0, 6).map(d => `${d.numero} · ${d.cliente_razon_social} · ${formatEuro(Number(d.total))}`), instruccion: 'Pregunta al usuario cuál.' }
+            const doc = docs[0]
+            const destinatarios = (args.destinatarios?.length ? args.destinatarios : await emailsDeCliente(ctx, doc.cliente_id, doc.cliente_email)).map((e: string) => e.trim()).filter(Boolean)
+            if (!destinatarios.length) return { error: `El cliente ${doc.cliente_razon_social} no tiene email guardado. Pide al usuario la dirección de correo.` }
+            const nombreDoc = NOMBRE[tipo].toLowerCase()
+            const asunto = args.asunto || `${NOMBRE[tipo]} ${doc.numero}`
+            const cuerpo = args.mensaje || `Estimados señores:\n\nLes adjuntamos ${tipo === 'factura' ? 'la' : 'el'} ${nombreDoc} ${doc.numero}${doc.total ? `, por importe de ${formatEuro(Number(doc.total))}` : ''}.\n\nLes agradeceríamos que nos confirmasen la recepción de este correo.\n\nQuedamos a su disposición para cualquier consulta.\n\nUn cordial saludo.`
+            const payload = { tipo, documentoId: doc.id, numero: doc.numero, cliente: doc.cliente_razon_social, destinatarios, cc: args.cc || [], asunto, cuerpo }
+            const accion = await crearAccion(ctx, 'email_documento', payload, describirAccion('email_documento', payload))
+            estado.accion = accion
+            return { preparado: true, pendiente_de_confirmacion: true, documento: doc.numero, cliente: doc.cliente_razon_social, para: destinatarios, asunto, instruccion: 'NO se ha enviado todavía. Di en una frase que está listo y que pulse Confirmar (o responda "sí").' }
+        }
+        case 'preparar_cobro': {
+            if (ctx.rol === 'lectura') return { error: 'Tu rol es de solo lectura.' }
+            const docs = await buscarDocumentoPorNumero(ctx, 'factura', args.numero_factura)
+            if (docs.length === 0) return { error: `No encuentro la factura "${args.numero_factura}".` }
+            if (docs.length > 1) return { varias_coincidencias: docs.slice(0, 6).map(d => `${d.numero} · ${d.cliente_razon_social}`), instruccion: 'Pregunta cuál.' }
+            const { data: f } = await ctx.supabase.from('facturas').select(CAMPOS_FACTURA_COBRO).eq('id', docs[0].id).single()
+            const fc = conInfo(f)
+            if (fc.info.estado === 'pagada') return { error: `La factura ${fc.numero} ya está pagada por completo.` }
+            const importe = args.importe != null ? r2(Number(args.importe)) : null
+            if (importe != null && importe > fc.info.pendiente + 0.01) return { error: `El importe supera lo pendiente (${formatEuro(fc.info.pendiente)}).` }
+            const payload = { facturaId: fc.id, numero: fc.numero, cliente: fc.cliente_razon_social, total: fc.info.total, cobrado: fc.info.cobrado, pendiente: fc.info.pendiente, importe, metodo: args.metodo || fc.metodo_pago || null, fecha: args.fecha || hoyISO(), nota: args.nota || null }
+            const accion = await crearAccion(ctx, 'cobro', payload, describirAccion('cobro', payload))
+            estado.accion = accion
+            return { preparado: true, pendiente_de_confirmacion: true, factura: fc.numero, pendiente: formatEuro(fc.info.pendiente), puede_confirmar: tienePermiso(ctx.rol, 'cobros'), instruccion: 'No se ha registrado aún. Pide confirmación en una frase.' }
+        }
+        case 'preparar_reclamacion_pago': {
+            if (!tienePermiso(ctx.rol, 'cobros')) return { error: 'Tu rol no permite reclamar pagos.' }
+            const docs = await buscarDocumentoPorNumero(ctx, 'factura', args.numero_factura)
+            if (docs.length !== 1) return docs.length ? { varias_coincidencias: docs.slice(0, 6).map(d => d.numero) } : { error: `No encuentro la factura "${args.numero_factura}".` }
+            const b = await borradorReclamacion(ctx, docs[0].id)
+            if (b.factura.info.estado === 'pagada') return { error: `La factura ${b.factura.numero} ya está pagada.` }
+            const destinatarios = await emailsDeCliente(ctx, b.factura.cliente_id, b.factura.cliente_email)
+            if (!destinatarios.length) return { error: 'El cliente no tiene email guardado. Pide la dirección.' }
+            const payload = { tipo: 'factura', documentoId: b.factura.id, numero: b.factura.numero, cliente: b.factura.cliente_razon_social, pendiente: b.factura.info.pendiente, etiqueta: b.factura.info.etiqueta, destinatarios, asunto: b.asunto, cuerpo: args.mensaje || b.cuerpo }
+            const accion = await crearAccion(ctx, 'reclamacion', payload, describirAccion('reclamacion', payload))
+            estado.accion = accion
+            return { preparado: true, pendiente_de_confirmacion: true, factura: b.factura.numero, para: destinatarios }
+        }
+        case 'preparar_gasto': {
+            if (!tienePermiso(ctx.rol, 'gastos')) return { error: 'Tu rol no permite registrar gastos.' }
+            const payload = {
+                proveedor: args.proveedor || null, fecha: args.fecha || hoyISO(), concepto: args.concepto || null,
+                base_imponible: args.base_imponible ?? null, iva_porcentaje: args.iva_porcentaje ?? null, iva_importe: args.iva_importe ?? null,
+                total: Number(args.total), categoria: args.categoria || null,
+            }
+            if (!(payload.total > 0)) return { error: 'Falta el importe total del gasto. Pregúntalo.' }
+            const accion = await crearAccion(ctx, 'gasto', payload, describirAccion('gasto', payload))
+            estado.accion = accion
+            const falta = payload.iva_porcentaje == null && payload.iva_importe == null ? 'iva' : !payload.categoria ? 'categoria' : null
+            return { preparado: true, pendiente_de_confirmacion: true, falta, instruccion: falta === 'iva' ? 'Pregunta qué IVA aplicar (21%, 10%, 4% u otro).' : falta === 'categoria' ? 'Puedes preguntar la categoría o dejar que confirme sin ella.' : 'Pide confirmación.' }
+        }
+        case 'previsualizar_presupuesto': {
+            if (!tienePermiso(ctx.rol, 'presupuestos')) return { error: 'Tu rol no permite crear presupuestos.' }
+            const { data: candidatos } = await ctx.supabase.from('contactos').select('id, razon_social, cif').ilike('razon_social', `%${args.client_name}%`).limit(5)
+            if (!candidatos?.length) return { existe_cliente: false, error: `No existe ningún cliente que coincida con "${args.client_name}". Debe darse de alta primero.` }
+            if (candidatos.length > 1 && !candidatos.some((c: any) => c.razon_social.toLowerCase() === String(args.client_name).toLowerCase())) {
+                return { varias_coincidencias: candidatos.map((c: any) => c.razon_social), instruccion: 'Pregunta cuál.' }
+            }
+            const contacto = candidatos.find((c: any) => c.razon_social.toLowerCase() === String(args.client_name).toLowerCase()) || candidatos[0]
+            const lineas = (args.lineas || []).map((l: any) => ({ descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precio_unitario: Number(l.precio_unitario) || 0, importe: r2((Number(l.cantidad) || 1) * (Number(l.precio_unitario) || 0)) }))
+            const base = r2(lineas.reduce((a: number, l: any) => a + l.importe, 0))
+            const ivaPct = args.iva_porcentaje != null ? Number(args.iva_porcentaje) : 21
+            const ivaImporte = r2(base * ivaPct / 100)
+            const total = r2(base + ivaImporte)
+            const validez = new Date(Date.now() + (Number(args.dias_validez) || 30) * 86400000).toISOString().slice(0, 10)
+            const payload = { clienteId: contacto.id, cliente: contacto.razon_social, lineas, base, ivaPct, ivaImporte, total, observaciones: args.observaciones || null, fecha_validez: validez }
+            const accion = await crearAccion(ctx, 'presupuesto', payload, describirAccion('presupuesto', payload))
+            estado.accion = accion
+            return { preparado: true, pendiente_de_confirmacion: true, cliente: contacto.razon_social, total: formatEuro(total), instruccion: 'No se ha guardado. Pide confirmación en una frase.' }
+        }
+        case 'crear_evento_agenda': {
+            if (!tienePermiso(ctx.rol, 'agenda')) return { error: 'Tu rol no permite gestionar la agenda.' }
+            let clienteId: string | null = null
+            if (args.client_name) {
+                const { data: c } = await ctx.supabase.from('contactos').select('id').ilike('razon_social', `%${args.client_name}%`).limit(1).maybeSingle()
+                clienteId = c?.id || null
+            }
+            const todoElDia = !String(args.inicio).includes('T')
+            const inicio = todoElDia ? new Date(`${args.inicio}T00:00:00${offsetMadrid(args.inicio)}`) : new Date(`${String(args.inicio).slice(0, 16)}:00${offsetMadrid(args.inicio)}`)
+            if (isNaN(inicio.getTime())) return { error: 'Fecha no válida. Pregunta la fecha y hora.' }
+            const fin = new Date(inicio.getTime() + (Number(args.duracion_minutos) || 60) * 60000)
+            const { data: ev, error } = await ctx.supabase.from('eventos').insert({
+                empresa_id: ctx.empresaId, titulo: args.titulo, tipo: args.tipo || 'cita', inicio: inicio.toISOString(), fin: todoElDia ? null : fin.toISOString(),
+                todo_el_dia: todoElDia, cliente_id: clienteId, notas: args.notas || null, usuario_id: ctx.userId, creado_por: ctx.userId, origen: ctx.origen === 'telegram' ? 'telegram' : 'ia',
+            }).select('id, titulo, inicio').single()
+            if (error) return { error: error.message }
+            await auditar(ctx, 'evento_creado', { tipo: 'evento', id: ev.id, ref: ev.titulo }, { inicio: ev.inicio })
+            return { creado: true, titulo: ev.titulo, inicio: ev.inicio }
+        }
+        case 'confirmar_accion_pendiente': {
+            if (!esConfirmacion(ultimoUsuario)) {
+                return { error: 'BLOQUEADO: el último mensaje del usuario no es una confirmación explícita. Pídele que pulse Confirmar o que responda "sí".' }
+            }
+            const pendiente = await ultimaAccionPendiente(ctx)
+            if (!pendiente) return { error: 'No hay ninguna acción pendiente de confirmar (puede que haya caducado). Vuelve a prepararla.' }
+            if (estado.accion?.id === pendiente.id) {
+                return { error: 'BLOQUEADO: esta acción se acaba de preparar en este mismo turno; el usuario aún no ha visto el resumen. Pide confirmación.' }
+            }
+            const r = await ejecutarAccion(ctx, pendiente.id)
+            estado.ejecutada = r
+            return r
+        }
+        case 'cancelar_accion_pendiente': {
+            const pendiente = await ultimaAccionPendiente(ctx)
+            if (pendiente) await cancelarAccion(ctx, pendiente.id)
+            return { cancelada: !!pendiente }
+        }
+    }
+    return undefined
+}
 
-    if (!message.tool_calls || message.tool_calls.length === 0) {
-        return message.content || 'No he podido generar una respuesta.'
+/**
+ * Ejecuta el asistente sobre una conversación. Mismo motor para el chat web
+ * y para Telegram. Todo lo que tiene efectos pasa por acciones confirmables.
+ */
+export async function runErpAssistant(ctx: Contexto, messages: ChatMessage[]): Promise<RespuestaAsistente> {
+    const ultimoUsuario = [...messages].reverse().find(m => m.role === 'user')?.content?.trim() || ''
+
+    // Atajo determinista: "sí"/"envíalo" justo después de preparar una acción
+    // la ejecuta sin depender de que el modelo llame a la herramienta.
+    if (esConfirmacion(ultimoUsuario) || esCancelacion(ultimoUsuario)) {
+        const pendiente = await ultimaAccionPendiente(ctx)
+        const ultimoAsistente = [...messages].reverse().find(m => m.role === 'assistant')
+        if (pendiente && ultimoAsistente?.accion_id === pendiente.id) {
+            if (esCancelacion(ultimoUsuario)) {
+                await cancelarAccion(ctx, pendiente.id)
+                return { texto: 'De acuerdo, lo he cancelado. No se ha hecho nada.', ejecutada: { ok: true, mensaje: 'Cancelada' } }
+            }
+            const r = await ejecutarAccion(ctx, pendiente.id)
+            return { texto: r.mensaje, ejecutada: r }
+        }
     }
 
-    // Red de seguridad server-side, independiente del criterio del modelo:
-    // crear_presupuesto_confirmado solo se ejecuta si el último mensaje real
-    // del usuario es una confirmación explícita y corta. Si el modelo se
-    // salta el paso de previsualización, esto lo bloquea igualmente.
-    const lastUserMessage = [...messages].reverse().find(m => m.role === 'user')?.content?.trim().toLowerCase() || ''
-    const isExplicitConfirmation = /^(s[ií]|si\b|confirmo|confirmar|adelante|dale|vale|ok|correcto|hazlo|cr[eé]a(lo)?|crear|proceed|yes)\b/.test(lastUserMessage)
-        && lastUserMessage.length < 40
+    const cupo = await comprobarCupoIA(ctx)
+    if (!cupo.ok) return { texto: cupo.mensaje }
 
-    const toolMessages = []
-    for (const toolCall of message.tool_calls) {
-        const args = JSON.parse((toolCall as any).function.arguments || '{}')
-        const name = (toolCall as any).function.name
+    const empresa = await ctx.supabase.from('empresas').select('nombre').eq('id', ctx.empresaId).maybeSingle()
+    const system = SYSTEM_PROMPT
+        .replaceAll('{{EMPRESA}}', empresa.data?.nombre || 'la empresa')
+        .replaceAll('{{USUARIO}}', ctx.nombre)
+        .replaceAll('{{ROL}}', ctx.rol)
+        .replaceAll('{{HOY_ISO}}', hoyISO())
+        .replaceAll('{{HOY_LARGO}}', new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Madrid' }))
 
-        if (name === 'crear_presupuesto_confirmado' && !isExplicitConfirmation) {
-            toolMessages.push({
-                tool_call_id: toolCall.id,
-                role: "tool" as const,
-                content: JSON.stringify({
-                    error: 'BLOQUEADO: el último mensaje del usuario no es una confirmación explícita y corta. No se ha creado nada. Vuelve a previsualizar_presupuesto y pide confirmación de nuevo.'
-                }),
+    const tools = [...lecturaTools, ...accionTools]
+    const conversacion: any[] = [
+        { role: 'system', content: system },
+        ...messages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({ role: m.role, content: m.content })),
+    ]
+    const estado: { accion: Accion | null; ejecutada: any } = { accion: null, ejecutada: null }
+    let tokensIn = 0, tokensOut = 0
+
+    try {
+        for (let paso = 0; paso < 5; paso++) {
+            const res = await openai.chat.completions.create({
+                model: MODELO,
+                messages: conversacion,
+                tools: tools as any,
+                tool_choice: 'auto',
+                temperature: 0.2,
             })
-            continue
+            tokensIn += res.usage?.prompt_tokens || 0
+            tokensOut += res.usage?.completion_tokens || 0
+            const msg = res.choices[0].message
+
+            if (!msg.tool_calls?.length) {
+                // Si se ejecutó una acción, el texto es el resultado REAL del
+                // servidor, no la paráfrasis del modelo.
+                return {
+                    texto: estado.ejecutada ? estado.ejecutada.mensaje : (msg.content || 'Hecho.'),
+                    accion: estado.accion ? accionPublica(estado.accion) : null,
+                    ejecutada: estado.ejecutada,
+                }
+            }
+
+            conversacion.push(msg)
+            for (const call of msg.tool_calls as any[]) {
+                let args: any = {}
+                try { args = JSON.parse(call.function.arguments || '{}') } catch { }
+                let resultado: any
+                try {
+                    resultado = await ejecutarAccionTool(ctx, call.function.name, args, ultimoUsuario, estado)
+                    if (resultado === undefined) resultado = await ejecutarLectura(ctx.supabase, call.function.name, args)
+                    if (resultado === undefined) resultado = { error: `Herramienta desconocida: ${call.function.name}` }
+                } catch (e: any) {
+                    resultado = { error: e?.message || 'Error ejecutando la herramienta' }
+                }
+                const json = JSON.stringify(resultado)
+                conversacion.push({ role: 'tool', tool_call_id: call.id, content: json.length > 60000 ? json.slice(0, 60000) + '…(recortado)' : json })
+            }
         }
-
-        const result = await executeTool(supabase, name, args)
-        toolMessages.push({
-            tool_call_id: toolCall.id,
-            role: "tool" as const,
-            content: JSON.stringify(result),
-        })
+        return { texto: 'He tenido que detenerme: la consulta necesitaba demasiados pasos. ¿Puedes concretarla un poco más?', accion: estado.accion ? accionPublica(estado.accion) : null }
+    } finally {
+        registrarUsoIA(ctx, { accion: 'chat', modelo: MODELO, tokensEntrada: tokensIn, tokensSalida: tokensOut }).catch(() => { })
     }
-
-    const final = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-            {
-                role: "system",
-                content: `REGLAS DE PRESENTACIÓN FINAL — OBLIGATORIAS:
-
-1. USA los totales del sistema. NUNCA calcules tú.
-2. LEE EL ESTADO REAL de cada documento, sin interpretarlo.
-3. MUESTRA los filtros aplicados cuando sea relevante.
-4. Si hay "desglose_facturas", muéstralo.
-5. Si el usuario mencionó una cifra diferente a la real, corrígele con los datos del sistema.
-6. Si no hay registros → "No se han encontrado registros con esos criterios."
-7. Si acabas de crear un presupuesto (resultado con "creado": true), confirma el número y el total con claridad.
-8. Sé conciso: esta respuesta puede leerse en Telegram o en el chat web. Máximo ~120 palabras salvo que listes varios documentos.
-9. Usa emojis solo para estructura, no decorativos. Nada de asteriscos de markdown.`,
-            },
-            { role: "system", content: systemContent },
-            ...messages,
-            message,
-            ...toolMessages,
-        ] as any,
-    })
-
-    return final.choices[0].message.content || 'Hecho.'
 }
+
+export { etiquetaMetodo }

@@ -11,6 +11,6 @@ export const config = {
     // route.ts), nunca con la cookie de sesión de Supabase: si pasara por
     // aquí, este middleware lo redirigiría a /login y Telegram nunca
     // recibiría la respuesta 200 que espera.
-    '/((?!_next/static|_next/image|favicon.ico|api/telegram|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/telegram|api/cron|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 }

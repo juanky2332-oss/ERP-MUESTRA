@@ -14,6 +14,12 @@ import {
     ChevronLeft,
     ChevronRight,
     Settings,
+    Truck,
+    Package,
+    Wallet,
+    CalendarDays,
+    BarChart3,
+    FileSignature,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
@@ -26,18 +32,23 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-    { href: '/', label: 'Resumen', icon: LayoutDashboard },
+    { href: '/', label: 'Inicio', icon: LayoutDashboard },
+    { href: '/contactos', label: 'Clientes', icon: Users },
+    { href: '/proveedores', label: 'Proveedores', icon: Truck },
+    { href: '/catalogo', label: 'Catálogo', icon: Package },
     { href: '/presupuestos', label: 'Presupuestos', icon: FileText },
     { href: '/albaranes', label: 'Albaranes', icon: Box },
     { href: '/facturas', label: 'Facturas', icon: FileInput },
     { href: '/gastos', label: 'Gastos', icon: Receipt },
-    { href: '/albaranes-firmados', label: 'Alb. Firmados', icon: FileText },
+    { href: '/cobros', label: 'Cobros y vencimientos', icon: Wallet },
+    { href: '/agenda', label: 'Agenda', icon: CalendarDays },
+    { href: '/informes', label: 'Informes', icon: BarChart3 },
 ]
 
-const secondaryItems = [
-    { href: '/contactos', label: 'Clientes', icon: Users },
+const secondaryItems: NavItem[] = [
+    { href: '/albaranes-firmados', label: 'Albaranes firmados', icon: FileSignature },
+    { href: '/emails', label: 'Correos', icon: Mail },
     { href: '/calculadora', label: 'Calculadora', icon: Calculator },
-    { href: '/emails', label: 'Emails', icon: Mail },
     { href: '/ajustes', label: 'Ajustes', icon: Settings },
 ]
 
@@ -66,12 +77,12 @@ export function SidebarContent({ collapsed, pathname, onNavigate }: SidebarConte
             </div>
 
             {/* Navigation (Linear Style) */}
-            <nav className="flex-1 px-4 py-8 space-y-10 overflow-y-auto overflow-x-hidden custom-scrollbar">
+            <nav className="flex-1 px-4 py-4 space-y-8 overflow-y-auto overflow-x-hidden custom-scrollbar">
                 {/* Main Modules */}
                 <div className="space-y-1.5">
-                    {!collapsed && <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4 opacity-70">Sistemas</p>}
+                    {!collapsed && <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 opacity-70">Gestión</p>}
                     {navItems.map((item) => {
-                        const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                        const isActive = item.href === '/' ? pathname === '/' : (pathname === item.href || pathname.startsWith(item.href + '/'))
                         return (
                             <Link
                                 key={item.href}
@@ -108,9 +119,9 @@ export function SidebarContent({ collapsed, pathname, onNavigate }: SidebarConte
 
                 {/* Tools */}
                 <div className="space-y-1.5">
-                    {!collapsed && <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4 opacity-70">Operaciones</p>}
+                    {!collapsed && <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 opacity-70">Más</p>}
                     {secondaryItems.map((item) => {
-                        const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                        const isActive = item.href === '/' ? pathname === '/' : (pathname === item.href || pathname.startsWith(item.href + '/'))
                         return (
                             <Link
                                 key={item.href}
@@ -118,13 +129,13 @@ export function SidebarContent({ collapsed, pathname, onNavigate }: SidebarConte
                                 title={collapsed ? item.label : undefined}
                                 onClick={onNavigate}
                                 className={cn(
-                                    "flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 group relative",
+                                    "flex items-center gap-3.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all duration-200 group relative",
                                     isActive
-                                        ? "bg-white text-primary shadow-[0_2px_10px_rgba(0,0,0,0.06)] ring-1 ring-slate-200/50"
-                                        : "text-slate-500 hover:text-primary hover:bg-slate-100/40"
+                                        ? "bg-sidebar-primary/10 text-sidebar-primary-foreground ring-1 ring-sidebar-primary/20"
+                                        : "text-sidebar-foreground/80 hover:text-white hover:bg-white/5"
                                 )}
                             >
-                                <item.icon className={cn("h-4.5 w-4.5 shrink-0 transition-colors", isActive ? "text-primary" : "text-slate-400 group-hover:text-primary")} />
+                                <item.icon className={cn("h-4.5 w-4.5 shrink-0 transition-colors", isActive ? "text-sidebar-primary" : "text-sidebar-foreground/60 group-hover:text-white")} />
                                 {!collapsed && <span className="tracking-tight">{item.label}</span>}
                             </Link>
                         )

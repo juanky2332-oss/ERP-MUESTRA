@@ -8,9 +8,22 @@ import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
+type Accion = { id: string; tipo: string; resumen: string }
+
 type Message = {
     role: 'user' | 'assistant' | 'system'
     content: string
+    accion?: Accion | null
+    accion_id?: string
+    accionEstado?: 'pendiente' | 'ejecutando' | 'hecha' | 'cancelada' | 'error'
+}
+
+const ETIQUETA_CONFIRMAR: Record<string, string> = {
+    email_documento: 'Enviar correo',
+    reclamacion: 'Enviar reclamación',
+    cobro: 'Confirmar cobro',
+    gasto: 'Guardar gasto',
+    presupuesto: 'Crear presupuesto',
 }
 
 export function ChatWidget() {
@@ -60,19 +73,43 @@ export function ChatWidget() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    messages: [...messages, userMsg].map(m => ({ role: m.role, content: m.content }))
+                    messages: [...messages, userMsg].map(m => ({ role: m.role, content: m.content, accion_id: m.accion_id }))
                 })
             })
 
             const data = await response.json()
             if (data.content) {
-                setMessages(prev => [...prev, { role: 'assistant', content: data.content }])
+                setMessages(prev => [
+                    // Si se confirmó por texto, la tarjeta anterior deja de estar pendiente.
+                    ...prev.map(m => (data.ejecutada && m.accionEstado === 'pendiente') ? { ...m, accionEstado: 'hecha' as const } : m),
+                    { role: 'assistant', content: data.content, accion: data.accion, accion_id: data.accion?.id, accionEstado: data.accion ? 'pendiente' : undefined },
+                ])
             }
         } catch (err) {
             console.error(err)
             setMessages(prev => [...prev, { role: 'assistant', content: '❌ Error de comunicación con Empresa X. Inténtalo de nuevo.' }])
         } finally {
             setIsLoading(false)
+        }
+    }
+
+    const decidirAccion = async (idx: number, accion: Accion, decision: 'confirmar' | 'cancelar') => {
+        setMessages(prev => prev.map((m, i) => i === idx ? { ...m, accionEstado: 'ejecutando' } : m))
+        try {
+            const res = await fetch('/api/chat/accion', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: accion.id, decision }),
+            })
+            const data = await res.json()
+            setMessages(prev => [
+                ...prev.map((m, i) => i === idx ? { ...m, accionEstado: decision === 'cancelar' ? 'cancelada' as const : data.ok ? 'hecha' as const : 'pendiente' as const } : m),
+                { role: 'assistant', content: data.mensaje || (data.ok ? 'Hecho.' : 'No se pudo completar.') },
+            ])
+            if (data.ok && decision === 'confirmar') toast.success('Hecho')
+        } catch {
+            setMessages(prev => prev.map((m, i) => i === idx ? { ...m, accionEstado: 'pendiente' } : m))
+            toast.error('Error de comunicación. Inténtalo de nuevo.')
         }
     }
 
@@ -232,7 +269,7 @@ export function ChatWidget() {
                             <h3 className="font-extrabold text-gray-800 tracking-tight">ARIA</h3>
                             <p className="text-[10px] text-[#1E88E5] font-bold uppercase tracking-widest flex items-center gap-1.5">
                                 <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                                Taller Conectado Pro
+                                Asistente del ERP
                             </p>
                         </div>
                     </div>
@@ -254,6 +291,24 @@ export function ChatWidget() {
                                     : "bg-gray-50 text-gray-800 ring-gray-100 rounded-bl-sm"
                             )}>
                                 {formatMessage(m.content)}
+                                {m.accion && (
+                                    <div className="mt-3 rounded-xl border border-indigo-200 bg-white p-3 text-xs text-gray-700 shadow-sm">
+                                        <p className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 mb-2">Pendiente de tu confirmación</p>
+                                        <pre className="whitespace-pre-wrap font-sans leading-relaxed">{m.accion.resumen}</pre>
+                                        {m.accionEstado === 'pendiente' || m.accionEstado === 'ejecutando' ? (
+                                            <div className="flex gap-2 mt-3">
+                                                <Button size="sm" disabled={m.accionEstado === 'ejecutando'} onClick={() => decidirAccion(i, m.accion!, 'confirmar')} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8">
+                                                    {m.accionEstado === 'ejecutando' ? 'Procesando…' : `✓ ${ETIQUETA_CONFIRMAR[m.accion.tipo] || 'Confirmar'}`}
+                                                </Button>
+                                                <Button size="sm" variant="outline" disabled={m.accionEstado === 'ejecutando'} onClick={() => decidirAccion(i, m.accion!, 'cancelar')} className="h-8">Cancelar</Button>
+                                            </div>
+                                        ) : (
+                                            <p className={cn("mt-2 font-bold", m.accionEstado === 'hecha' ? 'text-emerald-600' : 'text-gray-400')}>
+                                                {m.accionEstado === 'hecha' ? '✓ Confirmado' : 'Cancelado'}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ))}

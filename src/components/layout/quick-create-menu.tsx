@@ -2,16 +2,20 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Plus, FileText, Box, FileInput, Receipt } from "lucide-react"
+import { Plus, FileText, Box, FileInput, Receipt, Users, Truck, Wallet, CalendarPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 
 const ACTIONS = [
-    { href: "/presupuestos/new", label: "Nuevo presupuesto", icon: FileText, scheme: "text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400" },
-    { href: "/albaranes/new", label: "Nuevo albarán", icon: Box, scheme: "text-orange-600 bg-orange-50 dark:bg-orange-950/40 dark:text-orange-400" },
-    { href: "/facturas/new", label: "Nueva factura", icon: FileInput, scheme: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400" },
-    { href: "/gastos/new", label: "Registrar gasto", icon: Receipt, scheme: "text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400" },
+    { href: "/contactos?nuevo=1", label: "Cliente", icon: Users, scheme: "text-slate-700 bg-slate-100 dark:bg-slate-800 dark:text-slate-200" },
+    { href: "/proveedores?nuevo=1", label: "Proveedor", icon: Truck, scheme: "text-teal-600 bg-teal-50 dark:bg-teal-950/40 dark:text-teal-400" },
+    { href: "/presupuestos/new", label: "Presupuesto", icon: FileText, scheme: "text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400" },
+    { href: "/albaranes/new", label: "Albarán", icon: Box, scheme: "text-orange-600 bg-orange-50 dark:bg-orange-950/40 dark:text-orange-400" },
+    { href: "/facturas/new", label: "Factura", icon: FileInput, scheme: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400" },
+    { href: "/gastos/new", label: "Gasto", icon: Receipt, scheme: "text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400" },
+    { href: "/cobros", label: "Cobro", icon: Wallet, scheme: "text-green-700 bg-green-50 dark:bg-green-950/40 dark:text-green-400" },
+    { href: "/agenda?nuevo=1", label: "Evento", icon: CalendarPlus, scheme: "text-violet-600 bg-violet-50 dark:bg-violet-950/40 dark:text-violet-400" },
 ]
 
 interface QuickCreateMenuProps {
@@ -19,7 +23,7 @@ interface QuickCreateMenuProps {
     className?: string
 }
 
-/** Menú "+ Crear" reutilizable: acción primaria del ERP, disponible en topbar y barra móvil. */
+/** Menú "+ Crear": acción primaria del ERP, disponible en la cabecera y en la barra móvil. */
 export function QuickCreateMenu({ trigger, className }: QuickCreateMenuProps) {
     const [open, setOpen] = useState(false)
 
@@ -37,13 +41,13 @@ export function QuickCreateMenu({ trigger, className }: QuickCreateMenuProps) {
                 <SheetHeader>
                     <SheetTitle>¿Qué quieres crear?</SheetTitle>
                 </SheetHeader>
-                <div className="grid grid-cols-2 gap-3 px-4 pb-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-4 pb-2 max-w-3xl mx-auto w-full">
                     {ACTIONS.map((action) => (
                         <Link
                             key={action.href}
                             href={action.href}
                             onClick={() => setOpen(false)}
-                            className="flex flex-col items-start gap-3 rounded-2xl border border-border bg-card p-4 hover:border-primary/40 hover:shadow-md transition-all active:scale-95"
+                            className="flex flex-col items-start gap-3 rounded-2xl border border-border bg-card p-4 hover:border-primary/40 hover:shadow-md transition-all duration-150 active:scale-95"
                         >
                             <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center", action.scheme)}>
                                 <action.icon className="h-5 w-5" />

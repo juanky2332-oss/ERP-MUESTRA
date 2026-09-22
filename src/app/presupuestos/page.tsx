@@ -227,6 +227,9 @@ export default function PresupuestosPage() {
                                                         {budget.statuses?.includes('traspasado') && <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 shadow-none font-bold">Traspasado</Badge>}
                                                         {budget.statuses?.includes('pendiente') && <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-200 shadow-none font-bold">Pendiente</Badge>}
                                                         {budget.statuses?.includes('enviado') && <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-200 shadow-none font-bold">Enviado</Badge>}
+                                                        {(budget as any).aceptado && <Badge className="bg-emerald-600 text-white shadow-none font-bold">Aceptado</Badge>}
+                                                        {(budget as any).rechazado && <Badge className="bg-rose-100 text-rose-700 shadow-none font-bold">Rechazado</Badge>}
+                                                        {!(budget as any).aceptado && !(budget as any).rechazado && !budget.statuses?.includes('traspasado') && (budget as any).fecha_validez && (budget as any).fecha_validez < new Date().toISOString().slice(0, 10) && <Badge className="bg-slate-200 text-slate-600 shadow-none font-bold">Caducado</Badge>}
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>
@@ -330,6 +333,15 @@ export default function PresupuestosPage() {
                                     <Label className="font-bold text-emerald-900 cursor-pointer">Traspasado</Label>
                                     <div className={`w-4 h-4 border-2 rounded-full ${editingBudget.statuses?.includes('traspasado') ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`} />
                                 </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <Button type="button" variant={editingBudget.aceptado ? 'default' : 'outline'} className={editingBudget.aceptado ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''} onClick={() => { const v = !editingBudget.aceptado; updateBudget.mutate({ id: editingBudget.id, aceptado: v, rechazado: false } as any); setEditingBudget({ ...editingBudget, aceptado: v, rechazado: false }) }}>Aceptado</Button>
+                                    <Button type="button" variant={editingBudget.rechazado ? 'default' : 'outline'} className={editingBudget.rechazado ? 'bg-rose-600 hover:bg-rose-700 text-white' : ''} onClick={() => { const v = !editingBudget.rechazado; updateBudget.mutate({ id: editingBudget.id, rechazado: v, aceptado: false } as any); setEditingBudget({ ...editingBudget, rechazado: v, aceptado: false }) }}>Rechazado</Button>
+                                </div>
+                                <div>
+                                    <Label className="text-xs text-slate-500 font-bold uppercase">Válido hasta</Label>
+                                    <Input type="date" value={editingBudget.fecha_validez ? String(editingBudget.fecha_validez).slice(0, 10) : ''} onChange={e => { setEditingBudget({ ...editingBudget, fecha_validez: e.target.value || null }); updateBudget.mutate({ id: editingBudget.id, fecha_validez: e.target.value || null } as any) }} className="mt-1" />
+                                </div>
+                                <Button type="button" variant="outline" onClick={async () => { const { duplicarPresupuesto } = await import('@/actions/documents'); const r = await duplicarPresupuesto(editingBudget.id); if (r.success) { toast.success(`Duplicado como ${r.numero}`); setEditOpen(false); queryClient.invalidateQueries({ queryKey: ['budgets'] }) } else toast.error(String(r.error)) }}>Duplicar presupuesto</Button>
                             </div>
 
                             {/* DATOS */}

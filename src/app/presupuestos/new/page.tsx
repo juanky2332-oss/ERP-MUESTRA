@@ -18,7 +18,6 @@ export default function NewBudgetPage() {
         // Mapping form data to Supabase Schema
         await createBudget.mutateAsync({
             ...data,
-            numero: nextNumber, // User sees this number in PDF, so we try to respect it or let server generate (for now client-driven to match PDF)
             cliente_razon_social: client?.razon_social || 'Cliente Sin Registrar',
             cliente_cif: client?.cif || '',
             cliente_direccion: client?.direccion || '',
@@ -34,6 +33,7 @@ export default function NewBudgetPage() {
         })
         router.push('/presupuestos')
     }
+
 
     const handleGeneratePdf = async (data: any, mode: 'preview' | 'download' = 'download') => {
         const { generatePDF } = await import('@/lib/pdf-generator')

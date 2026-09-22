@@ -3,16 +3,16 @@
   import { format } from 'date-fns'
   import { es } from 'date-fns/locale'
 
-  export const generatePDF = async (doc: any, type: 'presupuesto' | 'albaran' | 'factura', mode: 'preview' | 'download' | 'blob' = 'download') => {
+  export const generatePDF = async (doc: any, type: 'presupuesto' | 'albaran' | 'factura', mode: 'preview' | 'download' | 'blob' | 'arraybuffer' = 'download', opts: { logoDataUrl?: string | null } = {}) => {
       const docTitle = type === 'presupuesto' ? 'PRESUPUESTO' : type === 'albaran' ? 'ALBARÁN' : 'FACTURA'
 
       const jsPDFInstance = new jsPDF()
 
       // 1. Logo
       try {
-          const imgProps = await getImageData('/icon-512.png')
-          if (imgProps) {
-              jsPDFInstance.addImage(imgProps.data, 'PNG', 15, 15, 22, 22)
+          const logo = opts.logoDataUrl ?? (await getImageData('/icon-512.png'))?.data
+          if (logo) {
+              jsPDFInstance.addImage(logo, 'PNG', 15, 15, 22, 22)
           }
       } catch (e) {
           console.warn('Logo not loaded', e)
@@ -78,6 +78,22 @@
           jsPDFInstance.text('SU REFERENCIA:', rightAlignX - 60, currentInfoY)
           jsPDFInstance.setFont('helvetica', 'normal')
           jsPDFInstance.text(doc.pedido_referencia, rightAlignX, currentInfoY, { align: 'right' })
+          currentInfoY += 6
+      }
+
+      if (type === 'factura' && doc.fecha_vencimiento) {
+          jsPDFInstance.setFont('helvetica', 'bold')
+          jsPDFInstance.text('VENCIMIENTO:', rightAlignX - 60, currentInfoY)
+          jsPDFInstance.setFont('helvetica', 'normal')
+          jsPDFInstance.text(format(new Date(doc.fecha_vencimiento), 'dd/MM/yyyy'), rightAlignX, currentInfoY, { align: 'right' })
+          currentInfoY += 6
+      }
+
+      if (type === 'presupuesto' && doc.fecha_validez) {
+          jsPDFInstance.setFont('helvetica', 'bold')
+          jsPDFInstance.text('VÁLIDO HASTA:', rightAlignX - 60, currentInfoY)
+          jsPDFInstance.setFont('helvetica', 'normal')
+          jsPDFInstance.text(format(new Date(doc.fecha_validez), 'dd/MM/yyyy'), rightAlignX, currentInfoY, { align: 'right' })
           currentInfoY += 6
       }
 
@@ -227,9 +243,21 @@
       drawFooterRow(`IVA ${ivaPct}%`, `${ivaImp.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`)
       drawFooterRow('TOTAL', `${totalDoc.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`, true)
 
+      if (type === 'factura' && (doc.forma_pago || doc.metodo_pago)) {
+          jsPDFInstance.setFont('helvetica', 'bold')
+          jsPDFInstance.setFontSize(8)
+          jsPDFInstance.text('FORMA DE PAGO:', marginX, totalsBoxY + 5)
+          jsPDFInstance.setFont('helvetica', 'normal')
+          const lineasPago = jsPDFInstance.splitTextToSize(String(doc.forma_pago || doc.metodo_pago), 115)
+          jsPDFInstance.text(lineasPago, marginX, totalsBoxY + 10)
+          if (doc.iban) jsPDFInstance.text(`IBAN: ${doc.iban}`, marginX, totalsBoxY + 10 + lineasPago.length * 4)
+      }
+
       if (mode === 'preview') {
           const blob = jsPDFInstance.output('bloburl')
           return blob
+      } else if (mode === 'arraybuffer') {
+          return jsPDFInstance.output('arraybuffer')
       } else if (mode === 'blob') {
           return jsPDFInstance.output('blob')
       } else {
@@ -369,6 +397,8 @@
   }
 
   function getImageData(url: string): Promise<{ data: string, width: number, height: number } | null> {
+      // En servidor no hay Image/canvas: el logo se pasa ya cargado en opts.logoDataUrl.
+      if (typeof window === 'undefined') return Promise.resolve(null)
       return new Promise((resolve) => {
           const img = new Image();
           img.src = url;
