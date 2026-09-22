@@ -11,6 +11,8 @@ export const config = {
     // route.ts), nunca con la cookie de sesión de Supabase: si pasara por
     // aquí, este middleware lo redirigiría a /login y Telegram nunca
     // recibiría la respuesta 200 que espera.
-    '/((?!_next/static|_next/image|favicon.ico|api/telegram|api/cron|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    // /api/cron se autentica con CRON_SECRET, y el manifest de la PWA debe
+    // servirse sin sesión (si no, el navegador recibe el HTML del login).
+    '/((?!_next/static|_next/image|favicon.ico|api/telegram|api/cron|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 }
