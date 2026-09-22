@@ -225,7 +225,7 @@ export function ChatWidget() {
 
     if (!isOpen) {
         return (
-            <div className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50 flex flex-col items-end gap-2 pointer-events-none">
+            <div className="fixed bottom-24 right-4 md:bottom-6 md:right-6 z-50 flex flex-col items-end gap-2 pointer-events-none">
                 <Button
                     onClick={() => setIsOpen(true)}
                     className="h-14 w-14 md:h-16 md:w-16 rounded-full shadow-2xl bg-white hover:bg-gray-50 border-4 border-[#1E88E5]/20 p-0 relative group transition-all duration-500 hover:scale-110 active:scale-95 pointer-events-auto"
@@ -251,8 +251,8 @@ export function ChatWidget() {
     }
 
     return (
-        <div ref={containerRef} className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50 flex flex-col items-end gap-4 max-w-[calc(100vw-2rem)]">
-            <Card className="w-[calc(100vw-2rem)] sm:w-[350px] md:w-[450px] h-[80vh] sm:h-[650px] shadow-[0_20px_50px_rgba(30,136,229,0.15)] border-0 ring-1 ring-black/5 flex flex-col animate-in slide-in-from-bottom-8 fade-in duration-500 bg-white/95 backdrop-blur-md rounded-3xl overflow-hidden">
+        <div ref={containerRef} className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-50 flex flex-col items-end gap-4 max-w-[calc(100vw-2rem)]">
+            <Card className="w-[calc(100vw-2rem)] sm:w-[350px] md:w-[450px] h-[72vh] sm:h-[650px] shadow-[0_20px_50px_rgba(30,136,229,0.15)] border-0 ring-1 ring-black/5 flex flex-col animate-in slide-in-from-bottom-8 fade-in duration-500 bg-white/95 backdrop-blur-md rounded-3xl overflow-hidden">
                 <CardHeader className="bg-gradient-to-r from-[#1E88E5]/10 to-[#1E88E5]/5 p-4 sm:p-5 flex flex-row justify-between items-center border-b border-gray-100">
                     <div className="flex items-center gap-4">
                         <div className="h-12 w-12 relative drop-shadow-md rounded-full overflow-hidden bg-gradient-to-br from-[#4338ca] to-[#6366f1] flex items-center justify-center">

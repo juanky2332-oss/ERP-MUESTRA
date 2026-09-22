@@ -10,7 +10,6 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'Empresa X - ERP',
   description: 'Sistema de Gestión Administrativa para Empresa X, S.L.',
-  manifest: '/manifest.json', // Next.js generates this automatically from manifest.ts
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',

@@ -1,6 +1,8 @@
 import 'server-only'
 
-const API = () => `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
+// TELEGRAM_API_BASE solo se usa en pruebas (servidor simulado); en producción no se define.
+const BASE = () => process.env.TELEGRAM_API_BASE || 'https://api.telegram.org'
+const API = () => `${BASE()}/bot${process.env.TELEGRAM_BOT_TOKEN}`
 
 export type Boton = { text: string; callback_data?: string; url?: string }
 export type Teclado = Boton[][]
@@ -85,7 +87,7 @@ export async function descargarArchivoTelegram(fileId: string): Promise<{ buffer
     const ruta = info?.result?.file_path
     if (!ruta) return null
     if (info.result.file_size && info.result.file_size > 20 * 1024 * 1024) return null
-    const res = await fetch(`https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${ruta}`)
+    const res = await fetch(`${BASE()}/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${ruta}`)
     if (!res.ok) return null
     return { buffer: Buffer.from(await res.arrayBuffer()), ruta }
 }
