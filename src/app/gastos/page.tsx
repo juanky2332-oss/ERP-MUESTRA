@@ -42,7 +42,7 @@ const TODOS = 'all'
 export default function GastosPage() {
     const { month, year } = useGlobalFilter()
     const [page, setPage] = useState(1)
-    const [search, setSearch] = useState('')
+    const [search, setSearch] = useState(() => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('q') || '' : ''))
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
     const pageSize = 10
 

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
-import { Building2, Users, Bot, Mail, Palette, ShieldCheck, Loader2, UserPlus, Sun, Moon, Monitor } from 'lucide-react'
+import { Building2, Users, Bot, Mail, Palette, ShieldCheck, Loader2, UserPlus, Sun, Moon, Monitor, Puzzle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,6 +16,7 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { ROLES, etiquetaRol, type Rol } from '@/lib/permisos'
 import { guardarEmpresa, cambiarRolUsuario, invitarUsuario, guardarMiPerfil } from '@/actions/ajustes'
 import { MarcaAjustes } from '@/components/settings/marca-ajustes'
+import { MODULOS, moduloActivo } from '@/lib/modulos'
 
 const VARIABLES = ['{numero_factura}', '{nombre_cliente}', '{importe_pendiente}', '{importe_total}', '{fecha_vencimiento}', '{fecha_factura}', '{dias_retraso}', '{nombre_empresa}']
 
@@ -76,6 +77,7 @@ export function AjustesCliente({ datos, telegram }: { datos: any; telegram: Reac
                 <TabsTrigger value="telegram">Telegram</TabsTrigger>
                 <TabsTrigger value="correo">Correo de cobro</TabsTrigger>
                 <TabsTrigger value="ia">IA</TabsTrigger>
+                <TabsTrigger value="modulos">Módulos</TabsTrigger>
                 <TabsTrigger value="preferencias">Preferencias</TabsTrigger>
                 {editable && <TabsTrigger value="auditoria">Auditoría</TabsTrigger>}
             </TabsList>
@@ -160,6 +162,27 @@ export function AjustesCliente({ datos, telegram }: { datos: any; telegram: Reac
                         <div className="col-span-2 sm:col-span-1 text-xs text-muted-foreground">{datos.usoIA.porAccion.map(([k, v]: any) => <p key={k}>{k}: {v}</p>)}</div>
                     </div>
                     {editable && <Button onClick={() => guardar(['ia_activa', 'ia_limite_mensual'])} disabled={guardando}>Guardar</Button>}
+                </Seccion>
+            </TabsContent>
+
+            <TabsContent value="modulos" className="pt-4">
+                <Seccion icono={Puzzle} titulo="Módulos opcionales">
+                    <p className="text-sm text-muted-foreground">El ERP es el mismo para todas las empresas. Aquí activas las funciones extra que encajan con tu actividad; si no las usas, desaparecen del menú y del asistente.</p>
+                    <div className="space-y-3">
+                        {MODULOS.map(m => {
+                            const activo = moduloActivo(emp.modulos, m.id)
+                            return (
+                                <div key={m.id} className="rounded-xl border p-4 flex items-start gap-4">
+                                    <Switch disabled={!editable} checked={activo} onCheckedChange={v => set('modulos', { ...(emp.modulos || {}), [m.id]: v })} />
+                                    <div>
+                                        <p className="font-extrabold">{m.nombre} <span className="ml-1 text-[10px] font-bold uppercase rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{m.paraQuien}</span></p>
+                                        <p className="text-sm text-muted-foreground mt-1">{m.descripcion}</p>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                    {editable && <Button onClick={() => guardar(['modulos'])} disabled={guardando}>{guardando && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Guardar módulos</Button>}
                 </Seccion>
             </TabsContent>
 

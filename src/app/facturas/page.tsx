@@ -41,6 +41,7 @@ import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useInvoices } from '@/hooks/use-invoices'
 import { useSearchParams } from 'next/navigation'
+import { FirmaAcciones, FirmaEstado } from '@/components/firmados/firma-acciones'
 import { EstadoCobroBadge } from '@/components/cobros/estado-cobro'
 import { MarcarPagadaDialog } from '@/components/cobros/marcar-pagada-dialog'
 import { ReclamarDialog } from '@/components/cobros/reclamar-dialog'
@@ -53,7 +54,7 @@ export default function FacturasPage() {
     const { month, year } = useGlobalFilter()
     const searchParams = useSearchParams()
     const [page, setPage] = useState(1)
-    const [search, setSearch] = useState(searchParams.get('buscar') || '')
+    const [search, setSearch] = useState(searchParams.get('buscar') || searchParams.get('q') || '')
     const [pagar, setPagar] = useState<{ id: string; modo: 'total' | 'parcial' } | null>(null)
     const [reclamar, setReclamar] = useState<string | null>(null)
     const [historial, setHistorial] = useState<string | null>(null)
@@ -306,6 +307,7 @@ export default function FacturasPage() {
                                                     {doc.statuses?.includes('enviado') && (
                                                         <Badge className="bg-blue-50 text-blue-700 border-blue-200 font-bold text-[10px]"><Mail className="w-3 h-3 mr-1" /> ENVIADA</Badge>
                                                     )}
+                                                    <FirmaEstado tipo="factura" doc={doc} />
                                                 </div>
                                             </TableCell>
                                             <TableCell className="py-4 text-center grid place-items-center">
@@ -320,6 +322,7 @@ export default function FacturasPage() {
                                                         }}
                                                     />
                                                     <div className="flex items-center gap-1 opacity-100 group-hover:opacity-100 transition-opacity">
+                                                        <FirmaAcciones tipo="factura" doc={doc} onCambio={refrescar} />
                                                         {!(doc as any).anulada && infoCobro(doc as any).estado !== 'pagada' && (
                                                             <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-bold hidden lg:inline-flex" onClick={() => setPagar({ id: doc.id, modo: 'total' })} title="Marcar como pagada">
                                                                 <Check className="h-3.5 w-3.5 mr-1" /> Pagada

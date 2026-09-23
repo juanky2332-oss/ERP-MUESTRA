@@ -33,11 +33,12 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useDeliveryNotes } from '@/hooks/use-delivery-notes'
+import { FirmaAcciones, FirmaEstado } from '@/components/firmados/firma-acciones'
 
 export default function AlbaranesPage() {
     const { month, year } = useGlobalFilter()
     const [page, setPage] = useState(1)
-    const [search, setSearch] = useState('')
+    const [search, setSearch] = useState(() => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('q') || '' : ''))
     const [activeTab, setActiveTab] = useState<string>('all')
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
     const pageSize = 10
@@ -282,6 +283,7 @@ export default function AlbaranesPage() {
                                                     {doc.statuses?.includes('enviado') && (
                                                         <Badge className="bg-blue-50 text-blue-700 border-blue-200 font-bold text-[10px]">ENVIADO</Badge>
                                                     )}
+                                                    <FirmaEstado tipo="albaran" doc={doc} />
                                                 </div>
                                             </TableCell>
                                             <TableCell className="py-4 text-center grid place-items-center">
@@ -297,6 +299,7 @@ export default function AlbaranesPage() {
                                                         }}
                                                     />
                                                     <div className="flex items-center gap-1 opacity-100 group-hover:opacity-100 transition-opacity">
+                                                        <FirmaAcciones tipo="albaran" doc={doc} onCambio={() => queryClient.invalidateQueries({ queryKey: ['albaranes'] })} />
                                                         {/* Edit Button */}
                                                         <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600" onClick={() => { setEditingDoc({ ...doc, lineas: doc.lineas ? JSON.parse(JSON.stringify(doc.lineas)) : [] }); setEditOpen(true) }}>
                                                             <FileEdit className="h-4 w-4" />

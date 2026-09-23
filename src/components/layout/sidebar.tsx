@@ -24,6 +24,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 import { useEmpresa } from '@/hooks/use-empresa'
+import { MODULOS, moduloActivo } from '@/lib/modulos'
 
 interface NavItem {
     href: string
@@ -47,11 +48,12 @@ const navItems: NavItem[] = [
 ]
 
 const secondaryItems: NavItem[] = [
-    { href: '/albaranes-firmados', label: 'Albaranes firmados', icon: FileSignature },
+    { href: '/albaranes-firmados', label: 'Albaranes y partes firmados', icon: FileSignature },
     { href: '/emails', label: 'Correos', icon: Mail },
-    { href: '/calculadora', label: 'Calculadora', icon: Calculator },
     { href: '/ajustes', label: 'Ajustes', icon: Settings },
 ]
+
+const ICONOS_MODULO: Record<string, React.ElementType> = { calculadora_mecanizado: Calculator }
 
 // 1. EXTRAEMOS LA INTERFAZ AQUÍ ARRIBA
 interface SidebarContentProps {
@@ -64,6 +66,8 @@ interface SidebarContentProps {
 export function SidebarContent({ collapsed, pathname, onNavigate }: SidebarContentProps) {
     const { data: empresa } = useEmpresa()
     const nombre = empresa?.nombre_comercial || empresa?.nombre || 'Empresa X'
+    // Módulos opcionales activos para esta empresa (p. ej. calculadora de mecanizado)
+    const modulos: NavItem[] = MODULOS.filter(m => moduloActivo(empresa?.modulos, m.id)).map(m => ({ href: m.href, label: m.menu, icon: ICONOS_MODULO[m.id] || Calculator }))
     return (
         <div className="flex flex-col h-full">
             {/* Logo Area (Modernized) */}
@@ -122,6 +126,26 @@ export function SidebarContent({ collapsed, pathname, onNavigate }: SidebarConte
                         )
                     })}
                 </div>
+
+                {/* Módulos opcionales */}
+                {modulos.length > 0 && (
+                    <div className="space-y-1.5">
+                        {!collapsed && <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 opacity-70">Módulos</p>}
+                        {modulos.map((item) => {
+                            const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                            return (
+                                <Link key={item.href} href={item.href} title={collapsed ? item.label : undefined} onClick={onNavigate}
+                                    className={cn(
+                                        "flex items-center gap-3.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all duration-200 group relative",
+                                        isActive ? "bg-sidebar-primary/10 text-sidebar-primary-foreground ring-1 ring-sidebar-primary/20" : "text-sidebar-foreground/80 hover:text-white hover:bg-white/5"
+                                    )}>
+                                    <item.icon className={cn("h-4.5 w-4.5 shrink-0 transition-colors", isActive ? "text-sidebar-primary" : "text-sidebar-foreground/60 group-hover:text-white")} />
+                                    {!collapsed && <span className="tracking-tight">{item.label}</span>}
+                                </Link>
+                            )
+                        })}
+                    </div>
+                )}
 
                 {/* Tools */}
                 <div className="space-y-1.5">

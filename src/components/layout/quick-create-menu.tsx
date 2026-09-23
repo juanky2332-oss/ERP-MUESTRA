@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Plus, FileText, Box, FileInput, Receipt, Users, Truck, Wallet, CalendarPlus } from "lucide-react"
+import { Plus, FileText, Box, FileInput, Receipt, Users, Truck, Wallet, CalendarPlus, FileSignature } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
@@ -16,6 +16,7 @@ const ACTIONS = [
     { href: "/gastos/new", label: "Gasto", icon: Receipt, scheme: "text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400" },
     { href: "/cobros", label: "Cobro", icon: Wallet, scheme: "text-green-700 bg-green-50 dark:bg-green-950/40 dark:text-green-400" },
     { href: "/agenda?nuevo=1", label: "Evento", icon: CalendarPlus, scheme: "text-violet-600 bg-violet-50 dark:bg-violet-950/40 dark:text-violet-400" },
+    { href: "/albaranes-firmados", label: "Albarán o parte firmado", icon: FileSignature, scheme: "text-cyan-700 bg-cyan-50 dark:bg-cyan-950/40 dark:text-cyan-400" },
 ]
 
 interface QuickCreateMenuProps {
@@ -41,7 +42,7 @@ export function QuickCreateMenu({ trigger, className }: QuickCreateMenuProps) {
                 <SheetHeader>
                     <SheetTitle>¿Qué quieres crear?</SheetTitle>
                 </SheetHeader>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-4 pb-2 max-w-3xl mx-auto w-full">
+                <div className="grid grid-cols-3 gap-3 px-4 pb-2 max-w-3xl mx-auto w-full">
                     {ACTIONS.map((action) => (
                         <Link
                             key={action.href}

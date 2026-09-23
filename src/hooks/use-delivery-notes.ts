@@ -52,8 +52,8 @@ export function useDeliveryNotes({
 
             // 1. Fetch Counters efficiently (filtered by Date only)
             const fetchCounters = async () => {
+                // Los albaranes firmados siguen siendo albaranes: se listan todos
                 let q = supabase.from('albaranes').select('statuses, es_enviado, estado_vida', { count: 'exact', head: false })
-                    .is('documento_firmado_url', null) // Only normal albaranes
 
                 if (start && end) {
                     q = q.gte('fecha', start).lte('fecha', end)
@@ -72,7 +72,6 @@ export function useDeliveryNotes({
 
             // 2. Main Data Query
             let query = supabase.from('albaranes').select('*', { count: 'exact' })
-                .is('documento_firmado_url', null) // Only normal albaranes
 
             // Apply Date Filter
             if (start && end) {
@@ -110,7 +109,6 @@ export function useDeliveryNotes({
 
             // 3. Stats (Total Entregado, Total Pendiente) - Respecting Date Filter
             let statsQuery = supabase.from('albaranes').select('total, statuses')
-                .is('documento_firmado_url', null)
 
             if (start && end) {
                 statsQuery = statsQuery.gte('fecha', start).lte('fecha', end)

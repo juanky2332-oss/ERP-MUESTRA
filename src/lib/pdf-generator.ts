@@ -311,6 +311,35 @@
           jsPDFInstance.setTextColor(0, 0, 0)
       }
 
+      // Albarán firmado: sello en la zona libre junto a los totales
+      if (type === 'albaran' && doc.firmado_at) {
+          const verde: [number, number, number] = [5, 120, 80]
+          jsPDFInstance.setDrawColor(...verde)
+          jsPDFInstance.setLineWidth(0.6)
+          jsPDFInstance.roundedRect(marginX, totalsBoxY, 110, 18, 2, 2, "S")
+          jsPDFInstance.setTextColor(...verde)
+          jsPDFInstance.setFont('helvetica', 'bold')
+          jsPDFInstance.setFontSize(10)
+          jsPDFInstance.text('ENTREGADO Y FIRMADO POR EL CLIENTE', marginX + 4, totalsBoxY + 7)
+          jsPDFInstance.setFont('helvetica', 'normal')
+          jsPDFInstance.setFontSize(8)
+          const quien = doc.firmado_por ? `Recibido por ${doc.firmado_por} · ` : ''
+          jsPDFInstance.text(`${quien}${format(new Date(doc.firmado_at), 'dd/MM/yyyy')} · Documento firmado archivado`, marginX + 4, totalsBoxY + 13)
+          jsPDFInstance.setTextColor(0, 0, 0)
+          jsPDFInstance.setLineWidth(0.2)
+      }
+
+      // Factura: referencia a los albaranes/partes firmados que la soportan
+      if (type === 'factura' && doc.soportes_firmados) {
+          jsPDFInstance.setFontSize(8)
+          jsPDFInstance.setFont('helvetica', 'bold')
+          jsPDFInstance.setTextColor(5, 120, 80)
+          const lineasSoporte = jsPDFInstance.splitTextToSize(`SOPORTE FIRMADO: ${doc.soportes_firmados}`, tableWidth)
+          jsPDFInstance.text(lineasSoporte.slice(0, 2), marginX, finalY + 8)
+          jsPDFInstance.setTextColor(0, 0, 0)
+          jsPDFInstance.setFont('helvetica', 'normal')
+      }
+
       pintarPie(jsPDFInstance, marca)
 
       if (mode === 'preview') {

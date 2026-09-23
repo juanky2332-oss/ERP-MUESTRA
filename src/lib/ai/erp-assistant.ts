@@ -13,6 +13,9 @@ import { auditar } from "@/lib/auditoria"
 import { MATERIALES, precioConMercado, INDICES_REFERENCIA, type Material } from "@/lib/calculadora/materiales"
 import { calcular, FORMAS, type FormaId } from "@/lib/calculadora/calculo"
 import { obtenerMercado } from "@/lib/calculadora/mercado"
+import { informeEmpresa } from "@/lib/informes/servidor"
+import { estadoFirmas, etiquetaTipo } from "@/lib/firmados/servidor"
+import { moduloActivo } from "@/lib/modulos"
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 const MODELO = process.env.OPENAI_MODEL_CHAT || 'gpt-4o'
@@ -29,14 +32,19 @@ export interface RespuestaAsistente {
     accion?: { id: string; tipo: string; resumen: string } | null
     /** Resultado de una acción ejecutada en este turno. */
     ejecutada?: { ok: boolean; mensaje: string } | null
+    /** PDFs que el usuario ha pedido (Telegram los envía; la web muestra el enlace). */
+    archivos?: ArchivoPedido[]
 }
+
+export interface ArchivoPedido { tipo: 'factura' | 'albaran' | 'presupuesto' | 'expediente'; id: string; numero: string; url: string }
 
 const DB_SCHEMA = `
 ESTRUCTURA DE DATOS (resumen)
 - facturas: numero, fecha, fecha_vencimiento, cliente_razon_social, total, importe_cobrado, estado_cobro ('pendiente','parcial','pagada'), statuses, forma_pago, metodo_pago, anulada.
 - cobros: pagos de facturas (importe, fecha, metodo, origen, estado).
 - presupuestos: numero, fecha, fecha_validez, cliente_razon_social, total, statuses ('traspasado' = ya convertido en albarán), aceptado, rechazado.
-- albaranes: numero, fecha, cliente_razon_social, total, statuses, documento_firmado_url (firmados).
+- albaranes: numero, fecha, cliente_razon_social, total, statuses, factura_id (facturado), firmado_at/firmado_por (firmado por el cliente).
+- albaranes_firmados: albaranes, partes de trabajo y recepciones de material FIRMADOS por el cliente, unidos a su albarán y/o factura.
 - gastos: fecha, numero, proveedor, categoria, base_imponible, iva_importe, total.
 - contactos (clientes): razon_social, email, email_facturacion, telefono, cif, metodo_pago, condiciones de pago.
 - notificaciones_historial: correos enviados.
@@ -85,8 +93,32 @@ const lecturaTools = [
     },
     {
         type: "function", function: {
-            name: "get_albaranes_firmados", description: "Albaranes firmados digitalizados.",
-            parameters: { type: "object", properties: { client_name: { type: "string" }, status: { type: "string", enum: ["Pendiente", "Traspasado"] }, period: { type: "string", enum: ["this_month", "last_month", "this_year", "all_time", "custom_month", "custom_range"] }, year: { type: "number" }, month: { type: "number" }, date_from: { type: "string" }, date_to: { type: "string" }, limit: { type: "number" } } }
+            name: "get_albaranes_firmados",
+            description: "Albaranes y partes de trabajo FIRMADOS por clientes y control de firmas: cuáles están pendientes de unir, albaranes entregados SIN firma, facturas sin soporte firmado, incidencias anotadas por el cliente.",
+            parameters: { type: "object", properties: { client_name: { type: "string" }, filtro: { type: "string", enum: ["todos", "pendientes_de_unir", "con_incidencias", "albaranes_sin_firma", "facturas_sin_soporte"] }, limit: { type: "number" } } }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "get_informe",
+            description: "INFORME de la empresa de cualquier periodo (mes concreto, trimestre, año, rango) y opcionalmente de un cliente: facturado, cobrado, gastos, resultado y margen, comparación con el periodo anterior, ventas por cliente y por concepto, deuda por antigüedad, IVA por trimestre, conversión de presupuestos, albaranes sin facturar. Úsalo para '¿cómo fue marzo?', 'informe del trimestre', '¿cuánto le facturé a X este año?', '¿cuánto IVA pago este trimestre?'.",
+            parameters: {
+                type: "object", properties: {
+                    preset: { type: "string", enum: ["este_mes", "mes_anterior", "trimestre", "trimestre_anterior", "este_ano", "ano_anterior", "ultimos_12", "mes", "personalizado"] },
+                    mes: { type: "string", description: "YYYY-MM si preset=mes" },
+                    desde: { type: "string", description: "YYYY-MM-DD si preset=personalizado" },
+                    hasta: { type: "string", description: "YYYY-MM-DD si preset=personalizado" },
+                    client_name: { type: "string" },
+                    apartado: { type: "string", enum: ["resumen", "ventas", "cobros", "gastos", "iva", "presupuestos", "albaranes", "todo"] }
+                }, required: ["preset"]
+            }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "enviar_pdf",
+            description: "Entrega al usuario el PDF de una factura, albarán o presupuesto, o el EXPEDIENTE de una factura (factura + albaranes + albaranes/partes firmados en un solo PDF). Úsalo cuando pidan 'pásame/mándame/enséñame el PDF de…' o 'el expediente de la factura…' (a él, no por correo a un cliente).",
+            parameters: { type: "object", properties: { tipo: { type: "string", enum: ["factura", "albaran", "presupuesto", "expediente"] }, numero: { type: "string" }, client_name: { type: "string" } }, required: ["tipo", "numero"] }
         }
     },
     { type: "function", function: { name: "get_email_history", description: "Historial de correos enviados a clientes.", parameters: { type: "object", properties: { client_name: { type: "string" }, document_type: { type: "string" }, limit: { type: "number" } } } } },
@@ -151,7 +183,7 @@ const accionTools = [
     {
         type: "function", function: {
             name: "preparar_correo",
-            description: "Prepara un CORREO a un proveedor, cliente o dirección cualquiera (pedidos, consultas, avisos...). No envía nada hasta que el usuario confirme. POR DEFECTO VA SIN ADJUNTOS: solo rellena 'adjuntar' si el usuario ha pedido EXPRESAMENTE adjuntar un documento concreto.",
+            description: "Prepara un CORREO a un proveedor, cliente o dirección cualquiera (pedidos, consultas, avisos...). NO la uses para mandar una factura, presupuesto o albarán a su cliente: para eso es preparar_envio_documento. No envía nada hasta que el usuario confirme. POR DEFECTO VA SIN ADJUNTOS: solo rellena 'adjuntar' si el usuario ha pedido EXPRESAMENTE adjuntar un documento concreto.",
             parameters: {
                 type: "object", properties: {
                     destinatario: { type: "string", description: "Nombre del proveedor/cliente tal como lo diga el usuario, o un email" },
@@ -220,6 +252,36 @@ const accionTools = [
     },
     {
         type: "function", function: {
+            name: "preparar_documento",
+            description: "Prepara un ALBARÁN o una FACTURA nuevos para un cliente con sus líneas (calcula totales; la factura toma el vencimiento de las condiciones del cliente). No guarda nada hasta confirmar. No inventes precios: usa el catálogo o lo que diga el usuario.",
+            parameters: {
+                type: "object", properties: {
+                    tipo: { type: "string", enum: ["albaran", "factura"] },
+                    client_name: { type: "string" },
+                    lineas: { type: "array", items: { type: "object", properties: { descripcion: { type: "string" }, cantidad: { type: "number" }, precio_unitario: { type: "number", description: "Sin IVA" } }, required: ["descripcion", "cantidad", "precio_unitario"] } },
+                    iva_porcentaje: { type: "number" },
+                    pedido_referencia: { type: "string" },
+                    observaciones: { type: "string" }
+                }, required: ["tipo", "client_name", "lineas"]
+            }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "preparar_conversion",
+            description: "Prepara CONVERTIR un presupuesto en albarán (o en factura directamente) o un albarán en factura, copiando cliente y líneas. Úsalo para 'pasa el presupuesto X a albarán', 'factura el albarán Y', 'el cliente ha aceptado el presupuesto, hazle el albarán'. No guarda hasta confirmar.",
+            parameters: { type: "object", properties: { tipo_origen: { type: "string", enum: ["presupuesto", "albaran"] }, numero: { type: "string" }, destino: { type: "string", enum: ["albaran", "factura"] }, client_name: { type: "string" } }, required: ["tipo_origen", "numero", "destino"] }
+        }
+    },
+    {
+        type: "function", function: {
+            name: "preparar_estado_presupuesto",
+            description: "Prepara marcar un presupuesto como ACEPTADO o RECHAZADO por el cliente.",
+            parameters: { type: "object", properties: { numero: { type: "string" }, aceptado: { type: "boolean" }, client_name: { type: "string" } }, required: ["numero", "aceptado"] }
+        }
+    },
+    {
+        type: "function", function: {
             name: "crear_evento_agenda",
             description: "Crea un evento en la agenda (cita, llamada, reunión, visita, recordatorio...). Pregunta la fecha/hora si no la tienes.",
             parameters: {
@@ -254,16 +316,21 @@ const SYSTEM_PROMPT = `Eres "El Maikel", el asistente del ERP de {{EMPRESA}}: ce
 
 REGLA 1 — DATOS: ante cualquier pregunta sobre datos, llama primero a la herramienta. Nunca inventes números, fechas, estados, clientes, proveedores, productos, importes ni IVA. Usa los totales que calcula el sistema; no sumes tú.
 
-REGLA 2 — ACCIONES REALES: tú NO puedes enviar correos, registrar cobros, crear gastos ni presupuestos directamente. Para eso tienes herramientas "preparar_*" que dejan la acción lista y la interfaz muestra al usuario un resumen con botones Confirmar / Cancelar.
-- Cuando pidan enviar/mandar un DOCUMENTO del ERP (factura, presupuesto, albarán) por correo → preparar_envio_documento.
+REGLA 2 — ACCIONES REALES: tú NO puedes enviar correos, registrar cobros, crear gastos, presupuestos, albaranes ni facturas directamente. Para eso tienes herramientas "preparar_*" que dejan la acción lista y la interfaz muestra al usuario un resumen con botones Confirmar / Cancelar.
+- Cuando pidan enviar/mandar un DOCUMENTO del ERP (factura, presupuesto, albarán) por correo, aunque digan "mándale un correo… adjuntando la factura X" → preparar_envio_documento, directamente: el email sale solo de la ficha del cliente. NUNCA preguntes el email ni el nombre completo antes de llamarla; solo si la herramienta dice que falta.
 - Cuando pidan escribir/mandar un correo a un proveedor, cliente o a cualquiera sin que sea "enviar un documento" → preparar_correo. NO adjuntes nada salvo que el usuario lo pida expresamente ("adjunta", "con la factura X en PDF"...). Ante la duda, sin adjuntos. Si piden un texto concreto (p. ej. "formal, pidiendo que confirmen la recepción"), redáctalo tú en 'mensaje' con tono profesional: saludo formal ('Estimados señores:'), cuerpo claro y despedida ('Un cordial saludo.'), sin firma (la firma de la empresa se añade sola). Usa el número de documento completo (p. ej. FAC-01-2026). Nunca uses marcadores tipo [Tu nombre].
 - "La factura X está pagada" / "han pagado 300 € de la X" → preparar_cobro.
 - "Reclama la factura X" → preparar_reclamacion_pago.
 - Gasto dictado → preparar_gasto (si falta el total o el IVA, pregunta UNA sola cosa).
 - Peso o coste de material de una pieza/barra → calcular_pieza (si el material es ambiguo, di cuál has usado).
 - Presupuesto → previsualizar_presupuesto (busca antes en el catálogo si hay productos).
+- Albarán o factura nuevos → preparar_documento. Pasar presupuesto a albarán/factura o facturar un albarán → preparar_conversion. Cliente acepta/rechaza presupuesto → preparar_estado_presupuesto.
+- Informes, comparativas, "cómo fue tal mes/trimestre/año", IVA, ventas por cliente → get_informe (elige preset; para un mes concreto preset=mes y mes=YYYY-MM).
+- Albaranes o partes firmados, qué falta por firmar, incidencias de entregas → get_albaranes_firmados.
+- "Pásame el PDF de…", "el expediente de la factura…" → enviar_pdf.
 Después de preparar, responde en 1-2 frases diciendo qué has preparado y pide confirmación. NO repitas todo el resumen (ya lo ve con los botones). NUNCA digas "procederé a enviarlo", "enviaré" o "ya está enviado" si no has recibido de la herramienta un resultado con ok=true.
 - Si el usuario confirma por texto ("sí", "envíalo", "ok"), llama a confirmar_accion_pendiente y comunica EXACTAMENTE el mensaje que devuelva.
+- Si pide CAMBIAR algo de lo que acabas de preparar (el texto del correo, un importe, una línea...), vuelve a llamar a la MISMA herramienta con el MISMO documento/cliente y el cambio: la nueva preparación sustituye a la anterior. No cambies de herramienta ni de destinatario.
 - Si una herramienta devuelve error o varias coincidencias, explícalo y pregunta.
 
 REGLA 3 — PREGUNTAS: si falta un dato, haz UNA sola pregunta clara (por ejemplo "He encontrado dos clientes con ese nombre, ¿cuál?").
@@ -274,8 +341,9 @@ ${DB_SCHEMA}
 
 Hoy es {{HOY_LARGO}} ({{HOY_ISO}}).`
 
-const CONFIRMA_RE = /^(s[ií]+|sip|vale|ok(ay)?|okey|dale|adelante|confirm[oa]r?|conforme|correcto|de acuerdo|perfecto|hazlo|env[ií]a(lo|la|r)?|m[aá]nda(lo|la|r)?|cr[eé]a(lo|la|r)?|reg[ií]stra(lo|la|r)?|gu[aá]rda(lo|la|r)?|m[aá]rca(la|lo|r)?)\b/i
-const CANCELA_RE = /^(no\b|cancela|cancelar|anula|d[ée]jalo|olv[ií]dalo|no lo env[ií]es|para\b)/i
+const CONFIRMA_RE = /^(s[ií]+|sip|vale|ok(ay)?|okey|dale|adelante|confirm[oa]r?|conforme|correcto|de acuerdo|perfecto|hazlo|env[ií]a(lo|la|r)?|m[aá]nda(lo|la|r)?|cr[eé]a(lo|la|r)?|reg[ií]stra(lo|la|r)?|gu[aá]rda(lo|la|r)?|m[aá]rca(la|lo|r)?)(?![\p{L}\d])/iu
+// Fin de palabra Unicode: con \b, "sí" (con tilde) no se reconocía como confirmación
+const CANCELA_RE = /^(no(?![\p{L}\d])|cancela|cancelar|anula|d[ée]jalo|olv[ií]dalo|no lo env[ií]es|para(?![\p{L}\d]))/iu
 
 export function esConfirmacion(texto: string) {
     const t = (texto || '').trim()
@@ -302,7 +370,7 @@ async function elegirDocumento(ctx: Contexto, tipo: TipoDocumento, numero: strin
     return docs
 }
 
-async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimoUsuario: string, estado: { accion: Accion | null; ejecutada: any }, ultimosUsuario: string[] = [ultimoUsuario]): Promise<any> {
+async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimoUsuario: string, estado: { accion: Accion | null; ejecutada: any; archivos?: ArchivoPedido[] }, ultimosUsuario: string[] = [ultimoUsuario]): Promise<any> {
     switch (name) {
         case 'get_cobros_vencimientos': {
             if (!tienePermiso(ctx.rol, 'economico') && !tienePermiso(ctx.rol, 'ver')) return { error: 'Sin permiso' }
@@ -326,6 +394,8 @@ async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimo
             return { eventos: eventos || [], vencimientos_facturas: (venc || []).map((f: any) => ({ numero: f.numero, cliente: f.cliente_razon_social, vence: f.fecha_vencimiento, pendiente: formatEuro(Number(f.total) - Number(f.importe_cobrado || 0)) })) }
         }
         case 'calcular_pieza': {
+            const { data: emp } = await ctx.supabase.from('empresas').select('modulos').eq('id', ctx.empresaId).maybeSingle()
+            if (!moduloActivo(emp?.modulos, 'calculadora_mecanizado')) return { error: 'La calculadora de mecanizado no está activada en esta empresa (Ajustes → Módulos).' }
             const { data: cfg } = await ctx.supabase.from('calculadora_config').select('precios, materiales_extra').eq('empresa_id', ctx.empresaId).maybeSingle()
             const todos: Material[] = [...MATERIALES, ...((cfg?.materiales_extra || []) as Material[])]
             const q = String(args.material || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -355,7 +425,7 @@ async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimo
                 origen_precio: propio?.precioKg ? `precio propio de la empresa (${propio.fecha})` : 'precio orientativo de almacén ajustado al mercado de hoy',
                 coste_material_por_pieza: formatEuro(r.costeMaterialLote / cant),
                 coste_material_total: formatEuro(r.costeMaterialLote),
-                nota: 'Solo material. Para tiempos de máquina, tratamientos y precio de venta, que use la Calculadora del ERP (menú Calculadora).',
+                nota: 'Solo material. Para tiempos de máquina, tratamientos y precio de venta, que use la Calculadora del ERP (menú Calculadora mecanizado).',
             }
         }
         case 'buscar_catalogo': {
@@ -363,6 +433,102 @@ async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimo
             const { data } = await ctx.supabase.from('catalogo').select('nombre, referencia, tipo, descripcion, unidad, precio_venta, iva_porcentaje, categoria').eq('activo', true)
                 .or(`nombre.ilike.%${t}%,referencia.ilike.%${t}%,descripcion.ilike.%${t}%,categoria.ilike.%${t}%`).limit(15)
             return { resultados: data || [], nota: (data || []).length ? undefined : 'No hay productos que coincidan en el catálogo. No inventes precios: pregunta al usuario.' }
+        }
+        case 'get_albaranes_firmados': {
+            const est = await estadoFirmas(ctx)
+            const f = args.filtro || 'todos'
+            if (f === 'albaranes_sin_firma') return { albaranes_sin_firma: est.albaranesSinFirma.filter((a: any) => !args.client_name || (a.cliente_razon_social || '').toLowerCase().includes(String(args.client_name).toLowerCase())).slice(0, 40).map((a: any) => ({ numero: a.numero, cliente: a.cliente_razon_social, fecha: a.fecha, total: formatEuro(Number(a.total)) })), total: est.albaranesSinFirma.length }
+            if (f === 'facturas_sin_soporte') return { facturas_sin_soporte_firmado: est.facturasSinSoporte.slice(0, 40).map((x: any) => ({ numero: x.numero, cliente: x.cliente_razon_social, fecha: x.fecha, total: formatEuro(Number(x.total)) })), total: est.facturasSinSoporte.length }
+            let q = ctx.supabase.from('albaranes_firmados').select('tipo, numero_documento, fecha_documento, cliente_razon_social, firmante_nombre, firmado, incidencias, created_at, origen, albaranes(numero), facturas(numero)').order('created_at', { ascending: false }).limit(Math.min(Number(args.limit) || 30, 100))
+            if (f === 'pendientes_de_unir') q = q.is('albaran_id', null).is('factura_id', null)
+            if (f === 'con_incidencias') q = q.eq('con_incidencias', true)
+            if (args.client_name) q = q.ilike('cliente_razon_social', `%${args.client_name}%`)
+            const { data } = await q
+            return {
+                control: { pendientes_de_unir: est.pendientesDeUnir, albaranes_entregados_sin_firma_120_dias: est.albaranesSinFirma.length, facturas_sin_soporte_firmado: est.facturasSinSoporte.length, con_incidencias: est.conIncidencias, sin_firma_detectada: est.sinFirmaDetectada },
+                documentos: (data || []).map((d: any) => ({ tipo: etiquetaTipo(d.tipo), numero: d.numero_documento, cliente: d.cliente_razon_social, fecha: d.fecha_documento || String(d.created_at).slice(0, 10), firmado_por: d.firmante_nombre, firmado: d.firmado, incidencias: d.incidencias, unido_a: [d.albaranes?.numero, d.facturas?.numero].filter(Boolean).join(' / ') || 'pendiente de unir' })),
+            }
+        }
+        case 'get_informe': {
+            if (!tienePermiso(ctx.rol, 'economico')) return { error: 'Tu rol no tiene acceso a los informes económicos.' }
+            let cliente: string | null = null, clienteNombre: string | null = null
+            if (args.client_name) {
+                const { data: cs } = await ctx.supabase.from('contactos').select('id, razon_social').ilike('razon_social', `%${args.client_name}%`).limit(5)
+                if (!cs?.length) return { error: `No encuentro el cliente "${args.client_name}".` }
+                if (cs.length > 1 && !cs.some((c: any) => c.razon_social.toLowerCase() === String(args.client_name).toLowerCase())) return { varias_coincidencias: cs.map((c: any) => c.razon_social), instruccion: 'Pregunta cuál.' }
+                const c = cs.find((c: any) => c.razon_social.toLowerCase() === String(args.client_name).toLowerCase()) || cs[0]
+                cliente = c.id; clienteNombre = c.razon_social
+            }
+            const { actual: a, anterior: b } = await informeEmpresa(ctx, { preset: args.preset, mes: args.mes, desde: args.desde, hasta: args.hasta, cliente })
+            const ap = args.apartado || 'resumen'
+            const e = (n: number | null) => (n == null ? null : formatEuro(n))
+            const out: any = {
+                periodo: `${a.periodo.etiqueta} (${a.periodo.desde} a ${a.periodo.hasta})`, cliente: clienteNombre, comparado_con: b.periodo.etiqueta,
+                resumen: {
+                    facturado_sin_iva: e(a.kpis.facturadoBase), facturado_con_iva: e(a.kpis.facturadoTotal), num_facturas: a.kpis.numFacturas, cobrado: e(a.kpis.cobrado),
+                    gastos_sin_iva: e(a.kpis.gastosBase), resultado: e(a.kpis.resultado), margen_pct: a.kpis.margen,
+                    pendiente_cobro_hoy: e(a.kpis.pendienteCobro), vencido_hoy: e(a.kpis.vencido), dias_medios_cobro: a.kpis.diasMedioCobro,
+                    periodo_anterior: { facturado: e(b.kpis.facturadoBase), cobrado: e(b.kpis.cobrado), gastos: e(b.kpis.gastosBase), resultado: e(b.kpis.resultado) },
+                },
+                nota: 'Importes calculados por el sistema; no los recalcules. El informe completo con gráficos está en el menú Informes.',
+            }
+            if (ap === 'ventas' || ap === 'todo') { out.ventas_por_cliente = a.ventasPorCliente.slice(0, 15).map(x => ({ cliente: x.clave, facturas: x.num, importe: e(x.importe) })); out.mas_vendido = a.porConcepto.slice(0, 10).map(x => ({ concepto: x.clave, importe: e(x.importe) })) }
+            if (ap === 'cobros' || ap === 'todo') { out.antiguedad_deuda = a.antiguedad.map(t => ({ tramo: t.etiqueta, importe: e(t.importe), facturas: t.num })); out.deudores = a.deudores.slice(0, 10).map(x => ({ cliente: x.clave, pendiente: e(x.importe) })) }
+            if (ap === 'gastos' || ap === 'todo') { out.gastos_por_categoria = a.gastosPorCategoria.map(x => ({ categoria: x.clave, importe: e(x.importe) })); out.gastos_por_proveedor = a.gastosPorProveedor.slice(0, 10).map(x => ({ proveedor: x.clave, importe: e(x.importe) })) }
+            if (ap === 'iva' || ap === 'todo') out.iva_trimestres = a.ivaTrimestres.map(t => ({ trimestre: t.trimestre, iva_repercutido: e(t.repercutido), iva_soportado: e(t.soportado), resultado: e(t.resultado) }))
+            if (ap === 'presupuestos' || ap === 'todo') out.presupuestos = { emitidos: a.presupuestos.num, importe: e(a.presupuestos.importe), aceptados: a.presupuestos.aceptados, tasa_aceptacion_pct: a.presupuestos.conversion, abiertos: a.presupuestos.abiertos, importe_abierto: e(a.presupuestos.importeAbierto) }
+            if (ap === 'albaranes' || ap === 'todo') out.albaranes = { emitidos: a.albaranes.num, sin_facturar: a.albaranes.pendientesFacturar, importe_sin_facturar: e(a.albaranes.importePendienteFacturar), sin_firma: a.albaranes.sinFirma, lista_sin_facturar: a.albaranes.pendientesLista.slice(0, 15).map(x => `${x.numero} · ${x.cliente} · ${formatEuro(x.importe)}`) }
+            return out
+        }
+        case 'enviar_pdf': {
+            const tipo = args.tipo === 'expediente' ? 'factura' : args.tipo as TipoDocumento
+            const docs = await elegirDocumento(ctx, tipo, args.numero, args.client_name)
+            if (!docs.length) return { error: `No encuentro ${NOMBRE[tipo].toLowerCase()} "${args.numero}".` }
+            if (docs.length > 1) return { varias_coincidencias: docs.slice(0, 6).map(d => `${d.numero} · ${d.cliente_razon_social}`), instruccion: 'Pregunta cuál.' }
+            const d = docs[0]
+            const archivo: ArchivoPedido = { tipo: args.tipo, id: d.id, numero: d.numero, url: args.tipo === 'expediente' ? `/api/expediente/${d.id}` : `/api/pdf/${tipo}/${d.id}` }
+            estado.archivos = [...(estado.archivos || []), archivo]
+            return { listo: true, documento: d.numero, instruccion: 'El PDF se entrega automáticamente al usuario. Di en una frase qué le mandas.' }
+        }
+        case 'preparar_documento': {
+            if (!tienePermiso(ctx.rol, 'documentos')) return { error: 'Tu rol no permite crear albaranes ni facturas.' }
+            const { data: candidatos } = await ctx.supabase.from('contactos').select('id, razon_social').ilike('razon_social', `%${args.client_name}%`).limit(5)
+            if (!candidatos?.length) return { error: `No existe ningún cliente que coincida con "${args.client_name}". Debe darse de alta primero.` }
+            if (candidatos.length > 1 && !candidatos.some((c: any) => c.razon_social.toLowerCase() === String(args.client_name).toLowerCase())) return { varias_coincidencias: candidatos.map((c: any) => c.razon_social), instruccion: 'Pregunta cuál.' }
+            const contacto = candidatos.find((c: any) => c.razon_social.toLowerCase() === String(args.client_name).toLowerCase()) || candidatos[0]
+            const lineas = (args.lineas || []).map((l: any) => ({ descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precio_unitario: Number(l.precio_unitario) || 0, importe: r2((Number(l.cantidad) || 1) * (Number(l.precio_unitario) || 0)) }))
+            if (!lineas.length) return { error: 'Faltan las líneas (qué, cuántas y a qué precio). Pregúntalo.' }
+            const base = r2(lineas.reduce((a: number, l: any) => a + l.importe, 0))
+            const ivaPct = args.iva_porcentaje != null ? Number(args.iva_porcentaje) : 21
+            const ivaImporte = r2(base * ivaPct / 100)
+            const payload = { tipoDoc: args.tipo, clienteId: contacto.id, cliente: contacto.razon_social, lineas, base, ivaPct, ivaImporte, total: r2(base + ivaImporte), pedido_referencia: args.pedido_referencia || null, observaciones: args.observaciones || null }
+            const accion = await crearAccion(ctx, 'documento', payload, describirAccion('documento', payload))
+            estado.accion = accion
+            return { preparado: true, pendiente_de_confirmacion: true, cliente: contacto.razon_social, total: formatEuro(payload.total), instruccion: 'No se ha guardado. Pide confirmación en una frase.' }
+        }
+        case 'preparar_conversion': {
+            const origen = args.tipo_origen as TipoDocumento
+            if (!tienePermiso(ctx.rol, 'documentos')) return { error: 'Tu rol no permite crear albaranes ni facturas.' }
+            if (origen === 'albaran' && args.destino !== 'factura') return { error: 'Un albarán solo se puede convertir en factura.' }
+            const docs = await elegirDocumento(ctx, origen, args.numero, args.client_name)
+            if (!docs.length) return { error: `No encuentro ${NOMBRE[origen].toLowerCase()} "${args.numero}".` }
+            if (docs.length > 1) return { varias_coincidencias: docs.slice(0, 6).map(d => `${d.numero} · ${d.cliente_razon_social}`), instruccion: 'Pregunta cuál.' }
+            const o = docs[0]
+            if (origen === 'albaran' && o.factura_id) { const { data: f } = await ctx.supabase.from('facturas').select('numero').eq('id', o.factura_id).maybeSingle(); return { error: `El albarán ${o.numero} ya está facturado en ${f?.numero || 'otra factura'}.` } }
+            if (origen === 'presupuesto' && args.destino === 'albaran') { const { data: ya } = await ctx.supabase.from('albaranes').select('numero').eq('presupuesto_id', o.id).limit(1).maybeSingle(); if (ya) return { error: `Ese presupuesto ya se convirtió en el albarán ${ya.numero}.` } }
+            const payload = { origenTipo: origen, origenId: o.id, origenNumero: o.numero, destino: args.destino, cliente: o.cliente_razon_social, total: Number(o.total) || 0, firmado: origen === 'albaran' && !!o.firmado_at }
+            const accion = await crearAccion(ctx, 'convertir', payload, describirAccion('convertir', payload))
+            estado.accion = accion
+            return { preparado: true, pendiente_de_confirmacion: true, origen: o.numero, destino: args.destino, instruccion: 'No se ha creado aún. Pide confirmación en una frase.' }
+        }
+        case 'preparar_estado_presupuesto': {
+            if (!tienePermiso(ctx.rol, 'presupuestos')) return { error: 'Tu rol no permite gestionar presupuestos.' }
+            const docs = await elegirDocumento(ctx, 'presupuesto', args.numero, args.client_name)
+            if (docs.length !== 1) return docs.length ? { varias_coincidencias: docs.slice(0, 6).map(d => `${d.numero} · ${d.cliente_razon_social}`) } : { error: `No encuentro el presupuesto "${args.numero}".` }
+            const payload = { presupuestoId: docs[0].id, numero: docs[0].numero, cliente: docs[0].cliente_razon_social, aceptado: !!args.aceptado }
+            const accion = await crearAccion(ctx, 'estado_presupuesto', payload, describirAccion('estado_presupuesto', payload))
+            estado.accion = accion
+            return { preparado: true, pendiente_de_confirmacion: true, instruccion: args.aceptado ? 'Pide confirmación y ofrece convertirlo después en albarán o factura.' : 'Pide confirmación.' }
         }
         case 'preparar_envio_documento': {
             if (!tienePermiso(ctx.rol, 'enviar')) return { error: 'Tu rol no permite enviar correos a clientes.' }
@@ -384,6 +550,15 @@ async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimo
         case 'preparar_correo': {
             if (!tienePermiso(ctx.rol, 'enviar')) return { error: 'Tu rol no permite enviar correos.' }
             const dest = String(args.destinatario || '').trim()
+            // "Mándale a la empresa A la factura 1": es enviar un documento a SU cliente
+            if ((args.adjuntar || []).length === 1 && !dest.includes('@')) {
+                const adj = args.adjuntar[0]
+                const docs = await elegirDocumento(ctx, adj.tipo_documento, adj.numero, dest.length >= 3 ? dest : undefined)
+                if (docs.length === 1 && (dest.length < 3 || (docs[0].cliente_razon_social || '').toLowerCase().includes(dest.toLowerCase()))) {
+                    return ejecutarAccionTool(ctx, 'preparar_envio_documento', { tipo_documento: adj.tipo_documento, numero: adj.numero, client_name: docs[0].cliente_razon_social, cc: args.cc, asunto: args.asunto, mensaje: args.mensaje }, ultimoUsuario, estado, ultimosUsuario)
+                }
+            }
+            if (dest.length < 3 && !dest.includes('@')) return { error: `"${dest}" es demasiado corto para saber a quién escribir. Pregunta el nombre completo o el email.` }
             let destinatarios: string[] = [], nombre = dest, tipoDest = args.tipo_destinatario || 'otro'
             if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dest)) {
                 destinatarios = [dest.toLowerCase()]
@@ -561,7 +736,7 @@ export async function runErpAssistant(ctx: Contexto, messages: ChatMessage[]): P
         { role: 'system', content: system },
         ...messages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({ role: m.role, content: m.content })),
     ]
-    const estado: { accion: Accion | null; ejecutada: any } = { accion: null, ejecutada: null }
+    const estado: { accion: Accion | null; ejecutada: any; archivos?: ArchivoPedido[] } = { accion: null, ejecutada: null, archivos: [] }
     let tokensIn = 0, tokensOut = 0
 
     try {
@@ -584,6 +759,7 @@ export async function runErpAssistant(ctx: Contexto, messages: ChatMessage[]): P
                     texto: estado.ejecutada ? estado.ejecutada.mensaje : (msg.content || 'Hecho.'),
                     accion: estado.accion ? accionPublica(estado.accion) : null,
                     ejecutada: estado.ejecutada,
+                    archivos: estado.archivos,
                 }
             }
 
@@ -600,6 +776,7 @@ export async function runErpAssistant(ctx: Contexto, messages: ChatMessage[]): P
                     resultado = { error: e?.message || 'Error ejecutando la herramienta' }
                 }
                 const json = JSON.stringify(resultado)
+                if (process.env.DEBUG_IA) console.log('[IA]', call.function.name, JSON.stringify(args).slice(0, 300), '→', json.slice(0, 300))
                 conversacion.push({ role: 'tool', tool_call_id: call.id, content: json.length > 60000 ? json.slice(0, 60000) + '…(recortado)' : json })
             }
         }

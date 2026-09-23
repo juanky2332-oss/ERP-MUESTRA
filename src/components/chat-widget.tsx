@@ -16,6 +16,7 @@ type Message = {
     accion?: Accion | null
     accion_id?: string
     accionEstado?: 'pendiente' | 'ejecutando' | 'hecha' | 'cancelada' | 'error'
+    archivos?: { tipo: string; numero: string; url: string }[]
 }
 
 const ETIQUETA_CONFIRMAR: Record<string, string> = {
@@ -25,6 +26,10 @@ const ETIQUETA_CONFIRMAR: Record<string, string> = {
     cobro: 'Confirmar cobro',
     gasto: 'Guardar gasto',
     presupuesto: 'Crear presupuesto',
+    documento: 'Crear documento',
+    convertir: 'Convertir',
+    estado_presupuesto: 'Confirmar',
+    firmado: 'Guardar y unir',
 }
 
 export function ChatWidget() {
@@ -83,7 +88,7 @@ export function ChatWidget() {
                 setMessages(prev => [
                     // Si se confirmó por texto, la tarjeta anterior deja de estar pendiente.
                     ...prev.map(m => (data.ejecutada && m.accionEstado === 'pendiente') ? { ...m, accionEstado: 'hecha' as const } : m),
-                    { role: 'assistant', content: data.content, accion: data.accion, accion_id: data.accion?.id, accionEstado: data.accion ? 'pendiente' : undefined },
+                    { role: 'assistant', content: data.content, accion: data.accion, accion_id: data.accion?.id, accionEstado: data.accion ? 'pendiente' : undefined, archivos: data.archivos || undefined },
                 ])
             }
         } catch (err) {
@@ -292,6 +297,15 @@ export function ChatWidget() {
                                     : "bg-gray-50 text-gray-800 ring-gray-100 rounded-bl-sm"
                             )}>
                                 {formatMessage(m.content)}
+                                {m.archivos?.length ? (
+                                    <div className="mt-2 flex flex-col gap-1.5">
+                                        {m.archivos.map(a => (
+                                            <a key={a.url} href={a.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50">
+                                                📄 {a.tipo === 'expediente' ? `Expediente de ${a.numero}` : `PDF ${a.numero}`}
+                                            </a>
+                                        ))}
+                                    </div>
+                                ) : null}
                                 {m.accion && (
                                     <div className="mt-3 rounded-xl border border-indigo-200 bg-white p-3 text-xs text-gray-700 shadow-sm">
                                         <p className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 mb-2">Pendiente de tu confirmación</p>

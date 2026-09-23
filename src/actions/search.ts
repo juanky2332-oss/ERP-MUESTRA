@@ -66,20 +66,19 @@ export async function searchGlobal(query: string): Promise<SearchResult[]> {
                         date: p.fecha,
                         client: p.cliente_razon_social,
                         total: p.total,
-                        url: `/presupuestos?search=${p.numero}`,
+                        url: `/presupuestos?q=${encodeURIComponent(p.numero)}`,
                         reference: p.pedido_referencia
                     }))
                 } else if (type === 'albaran') {
                     data.forEach((a: any) => {
-                        const isSigned = !!a.documento_firmado_url
                         results.push({
                             id: a.id,
-                            type: isSigned ? 'albaran_firmado' : 'albaran',
+                            type: 'albaran',
                             numero: a.numero,
                             date: a.fecha,
                             client: a.cliente_razon_social,
                             total: a.total,
-                            url: isSigned ? `/albaranes-firmados?search=${a.numero}` : `/albaranes?search=${a.numero}`,
+                            url: `/albaranes?q=${encodeURIComponent(a.numero)}`,
                             reference: a.pedido_referencia
                         })
                     })
@@ -91,7 +90,7 @@ export async function searchGlobal(query: string): Promise<SearchResult[]> {
                         date: f.fecha,
                         client: f.cliente_razon_social,
                         total: f.total,
-                        url: `/facturas?search=${f.numero}`,
+                        url: `/facturas?q=${encodeURIComponent(f.numero)}`,
                         reference: f.pedido_referencia
                     }))
                 } else if (type === 'gasto') {
@@ -102,7 +101,7 @@ export async function searchGlobal(query: string): Promise<SearchResult[]> {
                         date: g.fecha,
                         client: g.proveedor,
                         total: g.importe,
-                        url: `/gastos?search=${g.proveedor}`
+                        url: `/gastos?q=${encodeURIComponent(g.proveedor || "")}`
                     }))
                 }
             } else if (error) {

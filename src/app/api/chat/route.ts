@@ -16,7 +16,7 @@ export async function POST(req: Request) {
         if (transcript) historial.push({ role: 'user', content: String(transcript) })
 
         const r = await runErpAssistant(ctx, historial)
-        return NextResponse.json({ role: 'assistant', content: r.texto, accion: r.accion || null, ejecutada: r.ejecutada || null })
+        return NextResponse.json({ role: 'assistant', content: r.texto, accion: r.accion || null, ejecutada: r.ejecutada || null, archivos: r.archivos?.length ? r.archivos : null })
     } catch (error) {
         console.error("Chat Error:", error)
         const status = error instanceof ErrorPermiso ? 401 : 500

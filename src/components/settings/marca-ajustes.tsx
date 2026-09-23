@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { subirLogo, quitarLogo, guardarEmpresa } from '@/actions/ajustes'
 import { marcaDesdeEmpresa } from '@/lib/documentos/marca'
 import { invalidarMarcaCliente } from '@/lib/documentos/marca-cliente'
+import { prepararImagen } from '@/lib/imagen-cliente'
 
 const FACTURA_EJEMPLO = {
     numero: 'FAC-EJEMPLO', fecha: new Date().toISOString().slice(0, 10), fecha_vencimiento: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
@@ -22,35 +23,21 @@ const FACTURA_EJEMPLO = {
     base_imponible: 323, iva_porcentaje: 21, iva_importe: 67.83, total: 390.83, forma_pago: 'Transferencia a 30 días desde fecha de factura',
 }
 
-/** Convierte cualquier imagen a PNG (máx. 900 px) para que sirva en los PDF. */
-async function aPng(file: File): Promise<{ dataUrl: string; blob: Blob }> {
-    const url = URL.createObjectURL(file)
-    try {
-        const img = await new Promise<HTMLImageElement>((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ko(new Error('No se puede leer la imagen')); i.src = url })
-        const escala = Math.min(1, 900 / Math.max(img.naturalWidth || 900, img.naturalHeight || 900))
-        const c = document.createElement('canvas')
-        c.width = Math.max(1, Math.round((img.naturalWidth || 900) * escala)); c.height = Math.max(1, Math.round((img.naturalHeight || 900) * escala))
-        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
-        const dataUrl = c.toDataURL('image/png')
-        const blob = await new Promise<Blob>(ok => c.toBlob(b => ok(b!), 'image/png'))
-        return { dataUrl, blob }
-    } finally {
-        URL.revokeObjectURL(url)
-    }
-}
-
 function LogoCard({ tipo, empresa, editable, onCambio }: { tipo: 'app' | 'documentos'; empresa: any; editable: boolean; onCambio: () => void }) {
     const input = useRef<HTMLInputElement>(null)
-    const [propuesta, setPropuesta] = useState<{ file: File; dataUrl: string; blob: Blob; pdf?: string } | null>(null)
+    const [propuesta, setPropuesta] = useState<{ file: File; dataUrl: string; blob: Blob; tipo: 'image/png' | 'image/jpeg'; pdf?: string } | null>(null)
     const [subiendo, setSubiendo] = useState(false)
     const actual = tipo === 'app' ? empresa.logo_app_url : empresa.logo_documentos_url
 
     const elegir = async (f?: File | null) => {
         if (!f) return
-        if (f.size > 5 * 1024 * 1024) return toast.error('La imagen es demasiado grande (máx. 5 MB).')
+        if (input.current) input.current.value = ''
         if (!/^image\//.test(f.type)) return toast.error('Elige una imagen (PNG, JPG, WEBP o SVG).')
+        // Se admiten fotos de móvil grandes: se reducen aquí antes de subir
+        if (f.size > 25 * 1024 * 1024) return toast.error('La imagen es demasiado grande (máx. 25 MB).')
+        const aviso = toast.loading('Preparando la imagen…')
         try {
-            const png = await aPng(f)
+            const png = await prepararImagen(f, tipo === 'app' ? 512 : 1000)
             let pdf: string | undefined
             if (tipo === 'documentos') {
                 const { generatePDF } = await import('@/lib/pdf-generator')
@@ -59,8 +46,9 @@ function LogoCard({ tipo, empresa, editable, onCambio }: { tipo: 'app' | 'docume
             setPropuesta({ file: f, ...png, pdf })
         } catch (e: any) {
             toast.error(e?.message || 'No se pudo preparar la vista previa')
+        } finally {
+            toast.dismiss(aviso)
         }
-        if (input.current) input.current.value = ''
     }
 
     const confirmar = async () => {
@@ -68,11 +56,17 @@ function LogoCard({ tipo, empresa, editable, onCambio }: { tipo: 'app' | 'docume
         setSubiendo(true)
         const fd = new FormData()
         fd.append('tipo', tipo)
-        // Documentos: siempre PNG (lo que admiten los PDF). App: se respeta SVG si lo es.
-        if (tipo === 'app' && propuesta.file.type === 'image/svg+xml') fd.append('file', propuesta.file)
-        else fd.append('file', new File([propuesta.blob], `logo-${tipo}.png`, { type: 'image/png' }))
-        const r = await subirLogo(fd)
-        setSubiendo(false)
+        // Documentos: PNG o JPEG (lo que admiten los PDF). App: se respeta un SVG ligero.
+        if (tipo === 'app' && propuesta.file.type === 'image/svg+xml' && propuesta.file.size < 500 * 1024) fd.append('file', propuesta.file)
+        else fd.append('file', new File([propuesta.blob], `logo-${tipo}.${propuesta.tipo === 'image/jpeg' ? 'jpg' : 'png'}`, { type: propuesta.tipo }))
+        let r: Awaited<ReturnType<typeof subirLogo>>
+        try {
+            r = await subirLogo(fd)
+        } catch {
+            r = { success: false, error: 'No se pudo subir el logo (conexión o imagen demasiado pesada). Inténtalo de nuevo.' }
+        } finally {
+            setSubiendo(false)
+        }
         if (!r.success) return toast.error(r.error)
         invalidarMarcaCliente()
         toast.success(tipo === 'app' ? 'Logo de la app actualizado' : 'Logo de documentos actualizado: los nuevos PDF ya salen con él')

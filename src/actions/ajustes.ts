@@ -36,13 +36,17 @@ export async function getAjustes() {
     }
 }
 
-const CAMPOS_EMPRESA = ['nombre', 'nombre_comercial', 'nif', 'email', 'telefono', 'direccion', 'web', 'color_principal', 'color_documentos', 'iban', 'mostrar_iban_factura', 'pie_documentos', 'texto_factura', 'condiciones_presupuesto', 'mensaje_bienvenida', 'plantilla_reclamacion_asunto', 'plantilla_reclamacion_cuerpo', 'ia_activa', 'ia_limite_mensual'] as const
+const CAMPOS_EMPRESA = ['nombre', 'nombre_comercial', 'nif', 'email', 'telefono', 'direccion', 'web', 'color_principal', 'color_documentos', 'iban', 'mostrar_iban_factura', 'pie_documentos', 'texto_factura', 'condiciones_presupuesto', 'mensaje_bienvenida', 'plantilla_reclamacion_asunto', 'plantilla_reclamacion_cuerpo', 'ia_activa', 'ia_limite_mensual', 'modulos'] as const
 
 export async function guardarEmpresa(datos: any) {
     try {
         const ctx = await requirePermiso('ajustes')
         const payload: any = {}
         for (const k of CAMPOS_EMPRESA) if (k in datos) payload[k] = typeof datos[k] === 'string' ? datos[k].trim() : datos[k]
+        if ('modulos' in payload) {
+            const { MODULOS } = await import('@/lib/modulos')
+            payload.modulos = Object.fromEntries(MODULOS.map(m => [m.id, payload.modulos?.[m.id] !== false]))
+        }
         if ('ia_limite_mensual' in payload) payload.ia_limite_mensual = Math.max(0, Number(payload.ia_limite_mensual) || 0)
         for (const c of ['color_principal', 'color_documentos']) if (payload[c] && !/^#[0-9a-f]{6}$/i.test(payload[c])) throw new Error('Color no válido (usa formato #RRGGBB).')
         const { error } = await ctx.supabase.from('empresas').update(payload).eq('id', ctx.empresaId)

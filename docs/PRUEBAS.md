@@ -15,6 +15,9 @@ Requisitos en `.env.local`: las claves de Supabase y OpenAI, más
 | `npm run test:telegram` | Bot completo contra un Telegram simulado | app arrancada con las variables de abajo |
 | `node scripts/pruebas/test_calculadora_marca.js` | Calculadora en navegador (peso, mercado, crear presupuesto) y cambio de logos con confirmación | app arrancada + Chrome |
 | `npm run test:correo` | Correo libre a proveedor sin adjuntos salvo petición expresa; cálculo de peso desde el asistente | app arrancada |
+| `npm run test:telegram-total` | Trabajar todo desde Telegram: informes por periodo, albaranes (facturar, PDF), presupuestos (aceptar, pasar a albarán), albarán/parte firmado por foto o PDF unido a su albarán y factura, expediente PDF, crear albarán en lenguaje natural y confirmar con «sí» | app arrancada como en `test:telegram` |
+| `npm run test:firmados` | En Chrome: subir un parte firmado (la IA lo lee y propone a qué unirlo), cambiar la unión, sello FIRMADO en albaranes, expediente PDF, informes (todos los periodos, pestañas, cliente, mes concreto) y módulos opcionales | app arrancada + Chrome |
+| `npm run test:logo` | Subir como logo una foto de móvil de 8 MB (antes se quedaba cargando) | app arrancada + Chrome |
 | `npm run test:ui` | Interfaz en Chrome real: cobros, pagos parciales, agenda, catálogo, ficha de cliente, móvil y tema oscuro | app arrancada + Chrome (`CHROME_PATH`) |
 
 `test:app --enviar` además confirma el envío y manda de verdad el correo al cliente de prueba.
@@ -41,6 +44,14 @@ TELEGRAM_API_BASE=http://localhost:3200 TELEGRAM_BOT_TOKEN=TEST TELEGRAM_WEBHOOK
 - **PDF con marca:** logo proporcionado, datos, color, IBAN, texto de factura y pie legal (46 KB).
 - **Correo libre:** 4/4 — sin adjuntos por defecto; con adjunto solo si se pide; peso de barra Ø50×6000 C45 = 92,48 kg.
 
+## Resultados 23/09/2026 (firmados, informes, módulos, Telegram total)
+
+- **Unitarias:** 35/35 (14 vencimientos + 17 calculadora + 4 informes: periodos, periodo anterior, KPI, antigüedad de deuda, IVA, conversión).
+- **Telegram total:** 31/31 · **Telegram:** 38/38 · **Seguridad:** 26/26 · **App + IA:** 19/19 (4 ejecuciones seguidas) · **Interfaz:** 21/21 · **Calculadora + marca:** 18/18 · **Correo libre:** 4/4.
+- **Firmados + informes + módulos (Chrome):** 33/33. Expediente de 4 páginas (índice, factura, albarán, parte firmado).
+- **Logo desde foto de 8,7 MB:** 6/6 (se guarda en ~1 s como JPEG de ~90 KB / ~380 KB).
+- Bugs encontrados y corregidos: «sí» con tilde no confirmaba acciones; el listado de albaranes ocultaba los albaranes firmados; búsquedas por `albaran_ids` (jsonb) no funcionaban; el buscador global enlazaba a `?search=` que ninguna pantalla leía; subir una foto como logo superaba el límite de 1 MB de las server actions y se quedaba cargando.
+
 ## Pruebas manuales recomendadas tras cada despliegue
 
 1. Entrar, ver el aviso de vencidas y cerrarlo (no debe volver a salir hasta mañana o hasta que venza otra factura).
@@ -49,5 +60,7 @@ TELEGRAM_API_BASE=http://localhost:3200 TELEGRAM_BOT_TOKEN=TEST TELEGRAM_WEBHOOK
 4. Chat de El Maikel: "Mándale a <cliente> la factura <n> por correo" → revisar → Confirmar.
 5. Telegram: `/inicio`, `/vencidas`, `/pagada <n>` → Marcar pagada.
 6. Calculadora: elegir material y forma, poner medidas → comprobar peso y precio; «Crear presupuesto».
-7. Ajustes → Marca y documentos: subir logo de documentos → revisar la factura de ejemplo → Confirmar.
+7. Ajustes → Marca y documentos: subir logo (vale una foto del móvil) → revisar la vista previa → Confirmar.
+9. Albaranes y partes firmados: subir la foto de un albarán firmado → comprobar que propone su albarán → Guardar y unir → en Facturas, botón «Expediente».
+10. Telegram: foto de un albarán con «firmado» en el pie → elegir destino → Guardar; `/informe marzo`; «factura el albarán X» → sí.
 8. Ajustes → Usuarios: crear un usuario Comercial y comprobar que no ve importes ni puede confirmar cobros.

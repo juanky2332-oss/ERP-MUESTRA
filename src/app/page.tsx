@@ -35,7 +35,7 @@ async function getStats(monthFilter: string | undefined) {
     { data: historial }
   ] = await Promise.all([
     supabase.from('presupuestos').select('total, created_at, numero, cliente_razon_social, aceptado, rechazado, statuses').order('created_at', { ascending: false }),
-    supabase.from('albaranes').select('total, created_at').is('documento_firmado_url', null).order('created_at', { ascending: false }),
+    supabase.from('albaranes').select('total, created_at').order('created_at', { ascending: false }),
     supabase.from('facturas').select('total, created_at, estado, pagada, statuses, fecha_vencimiento, numero, cliente_razon_social, fecha').order('created_at', { ascending: false }),
     supabase.from('gastos').select('total, base_imponible, iva_importe, fecha, created_at').order('created_at', { ascending: false }),
     supabase.from('albaranes').select('total, created_at').not('documento_firmado_url', 'is', null).order('created_at', { ascending: false }),

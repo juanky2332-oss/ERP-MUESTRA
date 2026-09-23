@@ -55,8 +55,8 @@ const clic = (page, texto) => page.evaluate(t => { const b = [...document.queryS
         await esperar(4000)
         const { data: pres } = await admin.from('presupuestos').select('id, numero, lineas, total').eq('empresa_id', perfil.empresa_id).order('created_at', { ascending: false }).limit(1).single()
         const linea = pres?.lineas?.[0]?.descripcion || ''
-        if (pres && /Ø40×120/.test(linea)) limpieza.presupuestos.push(pres.id)
-        check('Presupuesto borrador creado con la línea de la pieza', /Eje · Ø40×120 mm · Acero C45/.test(linea), `${pres?.numero} · ${linea}`)
+        if (pres && /Ø40 ?× ?120/.test(linea)) limpieza.presupuestos.push(pres.id)
+        check('Presupuesto borrador creado con la línea de la pieza', /^Eje\nBarra redonda Ø40 × 120 mm\nMaterial: Acero C45/.test(linea), `${pres?.numero} · ${linea}`)
         const { data: calc } = await admin.from('calculos_piezas').select('id').eq('empresa_id', perfil.empresa_id).order('created_at', { ascending: false }).limit(1).maybeSingle()
         if (calc) limpieza.calculos.push(calc.id)
         check('Cálculo guardado en el historial', !!calc)

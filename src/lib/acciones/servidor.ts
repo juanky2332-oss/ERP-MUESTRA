@@ -11,6 +11,8 @@ import { etiquetaMetodo } from '@/lib/cobros/vencimientos'
 import { getNextSequenceNumber } from '@/lib/sequences'
 import { auditar } from '@/lib/auditoria'
 import { notificarCobroTelegram } from '@/lib/telegram/notificaciones'
+import { crearDocumento } from '@/lib/documentos/crear'
+import { registrarFirmado, etiquetaTipo } from '@/lib/firmados/servidor'
 
 /**
  * ACCIONES PENDIENTES DE CONFIRMACIÓN
@@ -25,7 +27,7 @@ import { notificarCobroTelegram } from '@/lib/telegram/notificaciones'
  * 30 minutos y solo la puede confirmar el usuario que la creó.
  */
 
-export type TipoAccion = 'email_documento' | 'email_libre' | 'reclamacion' | 'cobro' | 'gasto' | 'presupuesto'
+export type TipoAccion = 'email_documento' | 'email_libre' | 'reclamacion' | 'cobro' | 'gasto' | 'presupuesto' | 'documento' | 'convertir' | 'estado_presupuesto' | 'firmado'
 
 export interface Accion {
     id: string
@@ -233,6 +235,45 @@ async function ejecutarSegunTipo(ctx: Contexto, a: Accion): Promise<ResultadoAcc
             await auditar(ctx, 'documento_creado', { tipo: 'presupuesto', id: ins.id, ref: ins.numero }, { total: ins.total, cliente: contacto.razon_social, origen: 'ia' })
             return { ok: true, mensaje: `✅ Presupuesto ${ins.numero} creado en borrador para ${contacto.razon_social} por ${formatCurrency(Number(ins.total))}. No se ha enviado a nadie: revísalo en el ERP.`, datos: ins }
         }
+        case 'documento': {
+            // Albarán o factura nuevos para un cliente (mismo alta que la web)
+            const { data: c } = await ctx.supabase.from('contactos').select('*').eq('id', p.clienteId).maybeSingle()
+            if (!c) throw new Error('El cliente ya no existe.')
+            const doc = await crearDocumento(ctx, {
+                empresa_id: ctx.empresaId, fecha: new Date().toISOString().slice(0, 10),
+                cliente_id: c.id, cliente_razon_social: c.razon_social, cliente_cif: c.cif, cliente_direccion: c.direccion, cliente_telefono: c.telefono,
+                cliente_email: c.email_facturacion || c.email, cliente_codigo_postal: c.codigo_postal, cliente_ciudad: c.ciudad, cliente_provincia: c.provincia,
+                pedido_referencia: p.pedido_referencia || null, lineas: p.lineas, subtotal: p.base, base_imponible: p.base,
+                iva_porcentaje: p.ivaPct, iva_importe: p.ivaImporte, total: p.total, observaciones: p.observaciones || null,
+            }, p.tipoDoc)
+            return { ok: true, mensaje: `✅ ${NOMBRE[p.tipoDoc as TipoDocumento]} ${doc.numero} creado para ${c.razon_social} por ${formatCurrency(Number(doc.total))}.${p.tipoDoc === 'factura' && doc.fecha_vencimiento ? ` Vence el ${new Date(doc.fecha_vencimiento).toLocaleDateString('es-ES')}.` : ''} No se ha enviado a nadie.`, datos: { id: doc.id, numero: doc.numero, tipo: p.tipoDoc } }
+        }
+        case 'convertir': {
+            // Presupuesto → albarán, albarán → factura (o presupuesto → factura)
+            const { data: o } = await ctx.supabase.from(TABLA[p.origenTipo as TipoDocumento]).select('*').eq('id', p.origenId).maybeSingle()
+            if (!o) throw new Error('El documento de origen ya no existe.')
+            const campos = ['cliente_id', 'cliente_razon_social', 'cliente_cif', 'cliente_direccion', 'cliente_telefono', 'cliente_email', 'cliente_codigo_postal', 'cliente_ciudad', 'cliente_provincia', 'pedido_referencia', 'lineas', 'subtotal', 'base_imponible', 'iva_porcentaje', 'iva_importe', 'total', 'observaciones']
+            const datos: any = { empresa_id: ctx.empresaId, fecha: new Date().toISOString().slice(0, 10) }
+            for (const k of campos) if (o[k] !== undefined) datos[k] = o[k]
+            if (p.origenTipo === 'presupuesto' && p.destino === 'factura') datos.presupuesto_id = o.id
+            else { datos.source_document_id = o.id; datos.source_document_type = p.origenTipo }
+            const doc = await crearDocumento(ctx, datos, p.destino)
+            if (p.origenTipo === 'presupuesto') await ctx.supabase.from('presupuestos').update({ aceptado: true, rechazado: false }).eq('id', o.id)
+            return { ok: true, mensaje: `✅ ${NOMBRE[p.origenTipo as TipoDocumento]} ${o.numero} convertido en ${NOMBRE[p.destino as TipoDocumento].toLowerCase()} ${doc.numero} (${formatCurrency(Number(doc.total))}).${p.firmado ? ' La firma del albarán queda unida a la factura.' : ''}`, datos: { id: doc.id, numero: doc.numero, tipo: p.destino } }
+        }
+        case 'estado_presupuesto': {
+            assertPermiso(ctx, 'presupuestos')
+            const { error } = await ctx.supabase.from('presupuestos').update(p.aceptado ? { aceptado: true, rechazado: false } : { aceptado: false, rechazado: true }).eq('id', p.presupuestoId)
+            if (error) throw new Error(error.message)
+            await auditar(ctx, p.aceptado ? 'presupuesto_aceptado' : 'presupuesto_rechazado', { tipo: 'presupuesto', id: p.presupuestoId, ref: p.numero })
+            return { ok: true, mensaje: `✅ Presupuesto ${p.numero} marcado como ${p.aceptado ? 'ACEPTADO' : 'RECHAZADO'}.`, datos: { id: p.presupuestoId } }
+        }
+        case 'firmado': {
+            assertPermiso(ctx, 'documentos')
+            const d = p.destino
+            await registrarFirmado(ctx, { archivo_url: p.archivo_url, archivo_nombre: p.archivo_nombre, archivo_tipo: p.archivo_tipo, datos: p.datos || {}, albaran_id: d?.tipo === 'albaran' ? d.id : null, factura_id: d?.tipo === 'factura' ? d.id : null, origen: ctx.origen === 'telegram' ? 'telegram' : 'ia' })
+            return { ok: true, mensaje: d ? `✅ ${etiquetaTipo(p.datos?.tipo)} firmado unido a ${d.tipo === 'albaran' ? 'albarán' : 'factura'} ${d.numero}${d.factura_numero ? ` y a su factura ${d.factura_numero}` : ''}. Queda en el expediente.` : `✅ ${etiquetaTipo(p.datos?.tipo)} firmado guardado. Queda pendiente de unir (en la web: Albaranes y partes firmados).`, datos: { destino: d || null } }
+        }
     }
     return { ok: false, mensaje: 'Tipo de acción desconocido.' }
 }
@@ -265,6 +306,20 @@ export function describirAccion(tipo: TipoAccion, p: any): string {
             return `📄 Presupuesto (borrador) para ${p.cliente}\n` +
                 (p.lineas || []).map((l: any) => `• ${l.descripcion}: ${l.cantidad} × ${formatCurrency(l.precio_unitario)}`).join('\n') +
                 `\nBase: ${formatCurrency(p.base)} · IVA ${p.ivaPct}%: ${formatCurrency(p.ivaImporte)}\nTotal: ${formatCurrency(p.total)}`
+        case 'documento':
+            return `${p.tipoDoc === 'factura' ? '🧾 Factura' : '📦 Albarán'} nuevo para ${p.cliente}\n` +
+                (p.lineas || []).map((l: any) => `• ${l.descripcion}: ${l.cantidad} × ${formatCurrency(l.precio_unitario)}`).join('\n') +
+                `\nBase: ${formatCurrency(p.base)} · IVA ${p.ivaPct}%: ${formatCurrency(p.ivaImporte)}\nTotal: ${formatCurrency(p.total)}${p.pedido_referencia ? `\nSu referencia: ${p.pedido_referencia}` : ''}`
+        case 'convertir':
+            return `🔁 Convertir ${NOMBRE[p.origenTipo as TipoDocumento]?.toLowerCase()} ${p.origenNumero} (${p.cliente}) en ${NOMBRE[p.destino as TipoDocumento]?.toLowerCase()}\nImporte: ${formatCurrency(Number(p.total) || 0)}${p.firmado ? '\n✍️ El albarán está firmado: la firma pasará a la factura' : ''}`
+        case 'estado_presupuesto':
+            return `📝 Marcar presupuesto ${p.numero} (${p.cliente}) como ${p.aceptado ? 'ACEPTADO ✅' : 'RECHAZADO ❌'}`
+        case 'firmado': {
+            const d = p.datos || {}
+            return `✍️ ${etiquetaTipo(d.tipo)} firmado${d.numero_documento ? ' ' + d.numero_documento : ''}\nCliente: ${d.cliente || 'sin identificar'}${d.firmante_nombre ? `\nFirmado por: ${d.firmante_nombre}` : ''}${d.fecha_documento ? `\nFecha: ${d.fecha_documento.split('-').reverse().join('/')}` : ''}` +
+                `${d.firmado === false ? '\n⚠️ No se ve firma en el documento' : ''}${d.incidencias ? `\n⚠️ Incidencias: ${d.incidencias}` : ''}\n\n` +
+                (p.destino ? `Unir a: ${p.destino.tipo === 'albaran' ? 'albarán' : 'factura'} ${p.destino.numero}${p.destino.factura_numero ? ` (y factura ${p.destino.factura_numero})` : ''}` : 'Sin unir (quedará pendiente de unir)')
+        }
     }
     return ''
 }

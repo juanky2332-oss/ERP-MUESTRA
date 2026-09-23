@@ -44,7 +44,7 @@ export default function PresupuestosPage() {
 
     // Local state for Tabs (Status Filter)
     const [activeTab, setActiveTab] = useState('all') // 'all', 'PENDIENTE', 'TRASPASADO', 'ENVIADO'
-    const [search, setSearch] = useState('')
+    const [search, setSearch] = useState(() => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('q') || '' : ''))
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null)
     const [page, setPage] = useState(1)
     const pageSize = 10

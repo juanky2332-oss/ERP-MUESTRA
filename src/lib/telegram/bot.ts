@@ -17,6 +17,11 @@ import { subirArchivo } from '@/lib/archivos-servidor'
 import { resolveExpenseSupplier } from '@/lib/expense-supplier'
 import { CATEGORIAS_GASTO } from '@/lib/gastos/categorias'
 import { auditar } from '@/lib/auditoria'
+import { informeEmpresa } from '@/lib/informes/servidor'
+import { variacion } from '@/lib/informes/calcular'
+import { leerDocumentoFirmado, sugerirVinculos, estadoFirmas, dossierFactura, etiquetaTipo } from '@/lib/firmados/servidor'
+import { moduloActivo } from '@/lib/modulos'
+import type { ArchivoPedido } from '@/lib/ai/erp-assistant'
 
 const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL || 'https://erp-muestra.vercel.app'
 const MAX_HISTORIAL = 10
@@ -79,7 +84,10 @@ function tecladoInicio(ctx: Contexto): Teclado {
     if (eco) filas.push([{ text: '💰 Cobros', callback_data: 'm:cobros' }, { text: '🔴 Vencidas', callback_data: 'm:vencidas' }])
     if (tienePermiso(ctx.rol, 'gastos')) filas.push([{ text: '📷 Añadir gasto', callback_data: 'm:gasto' }, { text: '📝 Presupuestos', callback_data: 'm:presupuestos' }])
     else filas.push([{ text: '📝 Presupuestos', callback_data: 'm:presupuestos' }])
-    filas.push([{ text: '🔔 Avisos', callback_data: 'm:notif' }, { text: '❓ Ayuda', callback_data: 'm:ayuda' }])
+    if (tienePermiso(ctx.rol, 'documentos')) filas.push([{ text: '📦 Albaranes', callback_data: 'm:albaranes' }, { text: '✍️ Subir firmado', callback_data: 'm:firmado' }])
+    if (eco) filas.push([{ text: '📈 Informes', callback_data: 'm:informe' }, { text: '🔔 Avisos', callback_data: 'm:notif' }])
+    else filas.push([{ text: '🔔 Avisos', callback_data: 'm:notif' }])
+    filas.push([{ text: '❓ Ayuda', callback_data: 'm:ayuda' }])
     return filas
 }
 
@@ -97,8 +105,13 @@ const AYUDA = `<b>Cómo usar el bot</b>
 /cliente Nombre — ficha rápida
 /buscar texto — busca en todo el ERP
 
+/informe — informes: mes, trimestre, año o un mes concreto (<code>/informe marzo</code>)
+/albaranes — sin facturar y sin firma · /firmados — control de firmas
+/expediente F-42 — factura + albaranes + firmas en un PDF
+
 <b>Registrar</b>
 /pagada F-42 — marcar una factura como cobrada
+/firmado — subir un albarán o parte firmado (o manda la foto con «firmado» en el pie)
 📷 Foto de un ticket o factura de proveedor → borrador de gasto
 📷 Foto de un justificante con la palabra «pagada» → cobro
 🎙️ Nota de voz → la transcribo y la proceso
@@ -108,6 +121,10 @@ const AYUDA = `<b>Cómo usar el bot</b>
 «Han pagado 300 € de la F-38 por transferencia»
 «Mándale a Empresa A la factura 1 por correo»
 «¿Qué facturas vencen esta semana?»
+«Hazle un albarán a Empresa A de 10 ejes a 18 €»
+«Factura el albarán 3» · «Pasa el presupuesto 5 a albarán»
+«¿Cómo fue el trimestre comparado con el anterior?»
+«¿Cuánto pesa una barra de C45 de Ø50 × 1000?» (módulo calculadora)
 
 Todo lo que cambia datos o envía correos te pide confirmación antes.
 /notificaciones — elegir avisos · /desvincular — desconectar`
@@ -225,7 +242,7 @@ async function cmdPresupuestos(s: Sesion) {
     await enviar(s.chatId, ['📝 <b>Presupuestos por decidir</b>', '', ...pend.map((p: any) => {
         const caduca = p.fecha_validez ? (p.fecha_validez < hoy ? ' · ⚠️ caducado' : ` · válido hasta ${fechaCorta(p.fecha_validez)}`) : ''
         return `• <b>${esc(p.numero)}</b> · ${esc(p.cliente_razon_social)} · ${euro(p.total)}${caduca}`
-    })].join('\n'), [...pend.slice(0, 6).map((p: any) => [{ text: `📎 PDF ${p.numero}`, callback_data: `pdf:p:${p.id}` }]), ...botonesNav])
+    })].join('\n'), [...pend.slice(0, 6).map((p: any) => [{ text: `📎 ${p.numero}`, callback_data: `pdf:p:${p.id}` }, { text: '✅ Aceptado', callback_data: `pac:${p.id}` }, { text: '📦 A albarán', callback_data: `cnv:pa:${p.id}` }]), ...botonesNav])
 }
 
 async function cmdCliente(s: Sesion, nombre: string) {
@@ -267,7 +284,7 @@ async function fichaCliente(s: Sesion, id: string) {
 }
 
 async function detalleFactura(s: Sesion, facturaId: string, editarMsg?: number) {
-    const { data } = await s.ctx.supabase.from('facturas').select(CAMPOS_FACTURA_COBRO).eq('id', facturaId).maybeSingle()
+    const { data } = await s.ctx.supabase.from('facturas').select(CAMPOS_FACTURA_COBRO + ', soportes_firmados').eq('id', facturaId).maybeSingle()
     if (!data) return enviar(s.chatId, 'Factura no encontrada.', botonesNav)
     const f = conInfo(data)
     const eco = tienePermiso(s.ctx.rol, 'economico')
@@ -280,6 +297,7 @@ async function detalleFactura(s: Sesion, facturaId: string, editarMsg?: number) 
         eco ? `Cobrado: ${euro(f.info.cobrado)}` : '',
         eco ? `Pendiente: <b>${euro(f.info.pendiente)}</b>` : '',
         `Estado: ${icono(f)} ${esc(f.info.etiqueta)}`,
+        (data as any).soportes_firmados ? `✍️ Soporte firmado: ${esc((data as any).soportes_firmados)}` : '',
         f.reminder_count ? `Reclamada ${f.reminder_count} vez/veces (última ${fechaCorta(f.last_reminder_at)})` : '',
     ].filter(Boolean).join('\n')
     const teclado: Teclado = []
@@ -289,10 +307,181 @@ async function detalleFactura(s: Sesion, facturaId: string, editarMsg?: number) 
             teclado.push([{ text: '📧 Reclamar pago', callback_data: `rec:${f.id}` }])
         }
     }
-    teclado.push([{ text: '📎 Ver PDF', callback_data: `pdf:f:${f.id}` }, { text: '🌐 Abrir ERP', url: `${APP_URL()}/facturas?buscar=${encodeURIComponent(f.numero)}` }])
+    teclado.push([{ text: '📎 Ver PDF', callback_data: `pdf:f:${f.id}` }, { text: '📁 Expediente', callback_data: `exp:${f.id}` }])
+    teclado.push([{ text: '🌐 Abrir ERP', url: `${APP_URL()}/facturas?buscar=${encodeURIComponent(f.numero)}` }])
     teclado.push([{ text: '⬅️ Volver', callback_data: 'm:cobros' }, { text: '🏠 Inicio', callback_data: 'm:inicio' }])
     if (editarMsg) return editar(s.chatId, editarMsg, texto, teclado)
     return enviar(s.chatId, texto, teclado)
+}
+
+// ─────────────────────────────── informes ───────────────────────────────
+
+const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+/** "marzo", "03/2026", "2026-03", "marzo 2025" → YYYY-MM */
+function mesDeTexto(t: string): string | null {
+    const x = t.toLowerCase().trim()
+    const hoy = hoyISO()
+    let m = x.match(/(20\d{2})[-\/](\d{1,2})/) || x.match(/(\d{1,2})[-\/](20\d{2})/)
+    if (m) { const [a, b] = m[1].length === 4 ? [m[1], m[2]] : [m[2], m[1]]; return `${a}-${b.padStart(2, '0')}` }
+    const i = MESES_ES.findIndex(n => x.includes(n))
+    if (i < 0) return null
+    const anio = x.match(/20\d{2}/)?.[0] || (i + 1 > Number(hoy.slice(5, 7)) ? String(Number(hoy.slice(0, 4)) - 1) : hoy.slice(0, 4))
+    return `${anio}-${String(i + 1).padStart(2, '0')}`
+}
+
+function tecladoInformes(): Teclado {
+    const hoy = hoyISO()
+    const meses = Array.from({ length: 6 }, (_, i) => { const d = new Date(Date.UTC(Number(hoy.slice(0, 4)), Number(hoy.slice(5, 7)) - 1 - i, 1)); return d.toISOString().slice(0, 7) })
+    return [
+        [{ text: 'Este mes', callback_data: 'inf:este_mes' }, { text: 'Mes anterior', callback_data: 'inf:mes_anterior' }],
+        [{ text: 'Trimestre', callback_data: 'inf:trimestre' }, { text: 'Trim. anterior', callback_data: 'inf:trimestre_anterior' }],
+        [{ text: 'Este año', callback_data: 'inf:este_ano' }, { text: 'Año anterior', callback_data: 'inf:ano_anterior' }],
+        meses.slice(2, 6).map(m => ({ text: `${MESES_ES[Number(m.slice(5, 7)) - 1].slice(0, 3)} ${m.slice(2, 4)}`, callback_data: `inf:m:${m}` })),
+        [{ text: '🌐 Informe completo', url: `${APP_URL()}/informes` }, { text: '🏠 Inicio', callback_data: 'm:inicio' }],
+    ]
+}
+
+async function cmdInforme(s: Sesion, preset?: string, mes?: string) {
+    if (!tienePermiso(s.ctx.rol, 'economico')) return enviar(s.chatId, 'Tu rol no tiene acceso a los informes económicos.', botonesNav)
+    if (!preset) return enviar(s.chatId, '📈 <b>Informes</b>\n¿Qué periodo quieres ver? También puedes escribir <code>/informe marzo</code> o preguntarme en lenguaje normal («¿cuánto le facturé a X este año?»).', tecladoInformes())
+    await escribiendo(s.chatId)
+    const { actual: a, anterior: b } = await informeEmpresa(s.ctx, { preset, mes })
+    const k = a.kpis, kb = b.kpis
+    const v = (x: number, y: number, inv = false) => { const d = variacion(x, y); if (d == null || d === 0) return ''; const bueno = inv ? d < 0 : d > 0; return ` ${bueno ? '🟢' : '🔴'} ${d > 0 ? '+' : ''}${d.toLocaleString('es-ES')}%` }
+    const lineas = [
+        `📈 <b>${esc(a.periodo.etiqueta)}</b> <i>(vs ${esc(b.periodo.etiqueta)})</i>`, '',
+        `Facturado: <b>${euro(k.facturadoBase)}</b>${v(k.facturadoBase, kb.facturadoBase)} · ${k.numFacturas} fact.`,
+        `Cobrado: <b>${euro(k.cobrado)}</b>${v(k.cobrado, kb.cobrado)}`,
+        `Gastos: <b>${euro(k.gastosBase)}</b>${v(k.gastosBase, kb.gastosBase, true)}`,
+        `Resultado: <b>${euro(k.resultado)}</b>${k.margen != null ? ` (margen ${k.margen.toLocaleString('es-ES')}%)` : ''}`,
+        `IVA a pagar aprox.: ${euro(k.ivaRepercutido - k.ivaSoportado)}`,
+        '',
+        `Pendiente de cobro hoy: ${euro(k.pendienteCobro)} · vencido ${euro(k.vencido)}`,
+        k.diasMedioCobro != null ? `Días medios de cobro: ${k.diasMedioCobro}` : '',
+        `Presupuestos: ${a.presupuestos.num} · aceptados ${a.presupuestos.conversion ?? 0}%`,
+        `Albaranes sin facturar: ${a.albaranes.pendientesFacturar} (${euro(a.albaranes.importePendienteFacturar)})`,
+    ].filter(Boolean)
+    if (a.ventasPorCliente.length) lineas.push('', '<b>Mejores clientes</b>', ...a.ventasPorCliente.slice(0, 5).map(c => `• ${esc(c.clave)}: ${euro(c.importe)}`))
+    if (a.gastosPorCategoria.length) lineas.push('', '<b>Gastos por categoría</b>', ...a.gastosPorCategoria.slice(0, 4).map(c => `• ${esc(c.clave)}: ${euro(c.importe)}`))
+    const q = preset === 'mes' && mes ? `preset=mes&mes=${mes}` : `preset=${preset}`
+    await enviar(s.chatId, lineas.join('\n'), [[{ text: '🌐 Ver con gráficos', url: `${APP_URL()}/informes?${q}` }], ...tecladoInformes().slice(0, 3), [{ text: '🏠 Inicio', callback_data: 'm:inicio' }]])
+}
+
+// ─────────────────────────────── albaranes y firmados ───────────────────────────────
+
+async function cmdAlbaranes(s: Sesion) {
+    const { data } = await s.ctx.supabase.from('albaranes').select('id, numero, fecha, cliente_razon_social, total, factura_id, statuses, firmado_at').order('fecha', { ascending: false }).limit(40)
+    const sinFacturar = (data || []).filter((a: any) => !a.factura_id && !(a.statuses || []).includes('traspasado'))
+    if (!data?.length) return enviar(s.chatId, 'Todavía no hay albaranes.', botonesNav)
+    const lineas = ['📦 <b>Albaranes</b>', '', sinFacturar.length ? `<b>Sin facturar: ${sinFacturar.length}</b> (${euro(sinFacturar.reduce((x: number, a: any) => x + Number(a.total || 0), 0))})` : '✅ Todos facturados']
+    for (const a of (sinFacturar.length ? sinFacturar : data).slice(0, 10)) lineas.push(`${a.firmado_at ? '✍️' : '▫️'} <b>${esc(a.numero)}</b> · ${esc(a.cliente_razon_social)} · ${euro(a.total)}${a.firmado_at ? '' : ' · sin firma'}`)
+    lineas.push('', '<i>✍️ = firmado por el cliente</i>')
+    await enviar(s.chatId, lineas.join('\n'), [...(sinFacturar.length ? sinFacturar : data).slice(0, 8).map((a: any) => [{ text: `${a.numero} · ${a.cliente_razon_social}`.slice(0, 40), callback_data: `alb:${a.id}` }]), ...botonesNav])
+}
+
+async function detalleAlbaran(s: Sesion, id: string) {
+    const { data: a } = await s.ctx.supabase.from('albaranes').select('*').eq('id', id).maybeSingle()
+    if (!a) return enviar(s.chatId, 'Albarán no encontrado.', botonesNav)
+    const { data: fac } = a.factura_id ? await s.ctx.supabase.from('facturas').select('id, numero').eq('id', a.factura_id).maybeSingle() : { data: null }
+    const texto = [
+        `📦 <b>Albarán ${esc(a.numero)}</b>`, `Cliente: ${esc(a.cliente_razon_social)}`, `Fecha: ${fechaCorta(a.fecha)} · Total: ${euro(a.total)}`,
+        a.firmado_at ? `✍️ Firmado${a.firmado_por ? ' por ' + esc(a.firmado_por) : ''} el ${fechaCorta(a.firmado_at)}` : '▫️ Sin firma del cliente',
+        fac ? `🧾 Facturado en ${esc(fac.numero)}` : '⏳ Pendiente de facturar',
+    ].join('\n')
+    const t: Teclado = [[{ text: '📎 PDF', callback_data: `pdf:a:${a.id}` }]]
+    if (!fac && tienePermiso(s.ctx.rol, 'documentos')) t[0].push({ text: '🧾 Facturar', callback_data: `cnv:af:${a.id}` })
+    if (!a.firmado_at && tienePermiso(s.ctx.rol, 'documentos')) t.push([{ text: '✍️ Subir su albarán firmado', callback_data: `fir:${a.id}` }])
+    if (fac) t.push([{ text: `Ver ${fac.numero}`, callback_data: `fac:${fac.id}` }, { text: '📁 Expediente', callback_data: `exp:${fac.id}` }])
+    return enviar(s.chatId, texto, [...t, ...botonesNav])
+}
+
+async function cmdFirmados(s: Sesion) {
+    const e = await estadoFirmas(s.ctx)
+    const lineas = ['✍️ <b>Albaranes y partes firmados</b>', '',
+        `Pendientes de unir: <b>${e.pendientesDeUnir}</b>`,
+        `Albaranes entregados sin firma (120 días): <b>${e.albaranesSinFirma.length}</b>`,
+        `Facturas sin soporte firmado: <b>${e.facturasSinSoporte.length}</b>`,
+        `Con incidencias anotadas: <b>${e.conIncidencias}</b>`,
+        '', 'Para subir uno: manda la <b>foto o PDF</b> con «firmado» en el pie, o pulsa el botón.']
+    const t: Teclado = [[{ text: '✍️ Subir firmado', callback_data: 'm:firmado' }]]
+    for (const a of e.albaranesSinFirma.slice(-5).reverse()) t.push([{ text: `▫️ ${a.numero} · ${a.cliente_razon_social}`.slice(0, 40), callback_data: `alb:${a.id}` }])
+    t.push([{ text: '🌐 Abrir en el ERP', url: `${APP_URL()}/albaranes-firmados` }, { text: '🏠 Inicio', callback_data: 'm:inicio' }])
+    return enviar(s.chatId, lineas.join('\n'), t)
+}
+
+/** Foto/PDF de un albarán o parte firmado: se lee, se proponen destinos y se pregunta a cuál unirlo. */
+async function recibirFirmado(s: Sesion, archivo: { buffer: Buffer }, tipo: string, ext: string, nombre: string, destinoFijo?: string | null) {
+    if (!tienePermiso(s.ctx.rol, 'documentos')) return enviar(s.chatId, 'Tu rol no permite subir documentos firmados.')
+    const cupo = await comprobarCupoIA(s.ctx)
+    if (!cupo.ok) return enviar(s.chatId, cupo.mensaje)
+    await enviar(s.chatId, '✍️ Leyendo el documento firmado…')
+    const sub = await subirArchivo(s.ctx, 'albaranes-firmados', 'firmados', archivo.buffer, tipo, ext)
+    let datos: any = {}
+    try { datos = await leerDocumentoFirmado(s.ctx, archivo.buffer, tipo) } catch (e: any) { datos = {} }
+    registrarUsoIA(s.ctx, { accion: 'ocr_firmado', modelo: 'gpt-4o', tokensEntrada: 1500, tokensSalida: 300 }).catch(() => { })
+    let candidatos = await sugerirVinculos(s.ctx, datos, 4)
+    if (destinoFijo) {
+        const { data: a } = await s.ctx.supabase.from('albaranes').select('id, numero, cliente_razon_social, fecha, total, factura_id').eq('id', destinoFijo).maybeSingle()
+        if (a) {
+            const { data: f } = a.factura_id ? await s.ctx.supabase.from('facturas').select('numero').eq('id', a.factura_id).maybeSingle() : { data: null }
+            candidatos = [{ tipo: 'albaran' as const, id: a.id, numero: a.numero, cliente: a.cliente_razon_social, fecha: a.fecha, total: Number(a.total || 0), factura_id: a.factura_id, factura_numero: f?.numero || null, puntos: 999, motivo: 'elegido por ti' }, ...candidatos.filter(c => c.id !== a.id)].slice(0, 4)
+        }
+    }
+    const destino = candidatos[0] && candidatos[0].puntos >= 60 ? candidatos[0] : null
+    const payload = { archivo_url: sub.url, archivo_nombre: nombre, archivo_tipo: tipo.includes('pdf') ? 'application/pdf' : tipo, datos, candidatos, destino }
+    const a = await crearAccion(s.ctx, 'firmado', payload, describirAccion('firmado', payload))
+    return mostrarFirmado(s, a)
+}
+
+async function mostrarFirmado(s: Sesion, a: Accion, editarMsg?: number) {
+    const cands: any[] = a.payload.candidatos || []
+    const t: Teclado = cands.map((c, i) => [{ text: `${a.payload.destino?.id === c.id ? '✅ ' : ''}${c.tipo === 'albaran' ? 'Alb.' : 'Fact.'} ${c.numero} · ${c.cliente}`.slice(0, 44), callback_data: `frm:${a.id}:${i}` }])
+    t.push([{ text: `${!a.payload.destino ? '✅ ' : ''}No unir ahora`, callback_data: `frm:${a.id}:x` }])
+    t.push([{ text: a.payload.destino ? '💾 Guardar y unir' : '💾 Guardar sin unir', callback_data: `ok:${a.id}` }, { text: '❌ Cancelar', callback_data: `no:${a.id}` }])
+    const texto = esc(a.resumen) + '\n\n' + (cands.length ? '¿A qué documento lo unes? Elige y pulsa Guardar. Si no está en la lista, escribe su número (p. ej. <code>ALB-03-2026</code>).' : 'No encuentro a qué albarán o factura pertenece. Escribe su número o guárdalo sin unir.')
+    await guardarEstado(s, { esperando: 'destino_firmado', accionId: a.id, desde: new Date().toISOString() })
+    if (editarMsg) return editar(s.chatId, editarMsg, texto, t)
+    return enviar(s.chatId, texto, t)
+}
+
+/** Envía por Telegram los PDFs que haya pedido el asistente. */
+async function enviarArchivosPedidos(s: Sesion, archivos: ArchivoPedido[] | undefined) {
+    for (const f of archivos || []) {
+        await escribiendo(s.chatId, 'upload_document')
+        try {
+            if (f.tipo === 'expediente') {
+                const { pdf, nombre } = await dossierFactura(s.ctx, f.id)
+                await enviarDocumento(s.chatId, pdf, nombre, `📁 Expediente de la factura <b>${esc(f.numero)}</b> (factura + albaranes + firmados)`)
+            } else {
+                const { data: doc } = await s.ctx.supabase.from(f.tipo === 'factura' ? 'facturas' : f.tipo === 'albaran' ? 'albaranes' : 'presupuestos').select('*').eq('id', f.id).maybeSingle()
+                if (doc) await enviarDocumento(s.chatId, await pdfDeDocumento(doc, f.tipo, s.ctx), nombreArchivo(doc, f.tipo), `${esc(f.numero)} · ${esc(doc.cliente_razon_social || '')}`)
+            }
+        } catch (e: any) {
+            await enviar(s.chatId, `No he podido generar el PDF de ${esc(f.numero)}: ${esc(e?.message || '')}`)
+        }
+    }
+}
+
+async function prepararConversion(s: Sesion, modo: string, id: string) {
+    const [origenTipo, destino] = modo === 'af' ? ['albaran', 'factura'] : modo === 'pf' ? ['presupuesto', 'factura'] : ['presupuesto', 'albaran']
+    if (!tienePermiso(s.ctx.rol, 'documentos')) return enviar(s.chatId, 'Tu rol no permite crear albaranes ni facturas.')
+    const { data: o } = await s.ctx.supabase.from(origenTipo === 'albaran' ? 'albaranes' : 'presupuestos').select('*').eq('id', id).maybeSingle()
+    if (!o) return enviar(s.chatId, 'Documento no encontrado.')
+    if (origenTipo === 'albaran' && o.factura_id) return enviar(s.chatId, 'Ese albarán ya está facturado.', botonesNav)
+    if (origenTipo === 'presupuesto' && destino === 'albaran') { const { data: ya } = await s.ctx.supabase.from('albaranes').select('numero').eq('presupuesto_id', o.id).limit(1).maybeSingle(); if (ya) return enviar(s.chatId, `Ese presupuesto ya es el albarán ${esc(ya.numero)}.`, botonesNav) }
+    const payload = { origenTipo, origenId: o.id, origenNumero: o.numero, destino, cliente: o.cliente_razon_social, total: Number(o.total) || 0, firmado: origenTipo === 'albaran' && !!o.firmado_at }
+    const a = await crearAccion(s.ctx, 'convertir', payload, describirAccion('convertir', payload))
+    return mostrarAccion(s, a)
+}
+
+async function prepararEstadoPresupuesto(s: Sesion, id: string, aceptado: boolean) {
+    if (!tienePermiso(s.ctx.rol, 'presupuestos')) return enviar(s.chatId, 'Tu rol no permite gestionar presupuestos.')
+    const { data: p } = await s.ctx.supabase.from('presupuestos').select('id, numero, cliente_razon_social').eq('id', id).maybeSingle()
+    if (!p) return enviar(s.chatId, 'Presupuesto no encontrado.')
+    const payload = { presupuestoId: p.id, numero: p.numero, cliente: p.cliente_razon_social, aceptado }
+    const a = await crearAccion(s.ctx, 'estado_presupuesto', payload, describirAccion('estado_presupuesto', payload))
+    return mostrarAccion(s, a)
 }
 
 // ─────────────────────────────── acciones con confirmación ───────────────────────────────
@@ -364,6 +553,7 @@ async function prepararReclamacion(s: Sesion, facturaId: string) {
 // ─────────────────────────────── fotos, documentos y audio ───────────────────────────────
 
 const PALABRAS_PAGO = /pagad|cobrad|justificante|transferencia|bizum|comprobante|ingreso|pag[oó]/i
+const PALABRAS_FIRMADO = /firmad|firma\b|parte|albar[aá]n|entregad|recib[ií]|conforme|recepci[oó]n/i
 
 async function extraerDatosJustificante(s: Sesion, buffer: Buffer, tipo: string): Promise<{ numero_factura?: string; importe?: number; fecha?: string; metodo?: string }> {
     if (!process.env.OPENAI_API_KEY || tipo.includes('pdf')) return {}
@@ -432,7 +622,14 @@ async function recibirArchivo(s: Sesion, message: any) {
         return enviar(s.chatId, `📎 Justificante guardado.${extra}\n¿De qué factura es? Escribe el número (p. ej. <code>F-42</code>).`)
     }
 
-    // 3) Por defecto: ticket o factura de proveedor → borrador de gasto.
+    // 3) Albarán o parte FIRMADO (pie «firmado/parte/albarán…» o se estaba esperando).
+    if (estado.esperando === 'firmado' || PALABRAS_FIRMADO.test(caption)) {
+        const fijo = estado.esperando === 'firmado' ? estado.albaranId || null : null
+        await guardarEstado(s, null)
+        return recibirFirmado(s, archivo, tipo, ext, message.document?.file_name || `firmado.${ext}`, fijo)
+    }
+
+    // 4) Por defecto: ticket o factura de proveedor → borrador de gasto.
     if (!tienePermiso(s.ctx.rol, 'gastos')) return enviar(s.chatId, 'Tu rol no permite registrar gastos. Si es un justificante de pago, reenvíalo escribiendo «pagada» en el pie de la foto.')
     const cupo = await comprobarCupoIA(s.ctx)
     if (!cupo.ok) return enviar(s.chatId, cupo.mensaje)
@@ -531,6 +728,21 @@ async function procesarEsperando(s: Sesion, texto: string): Promise<boolean> {
             await prepararCobro(s, docs[0].id, null, { justificante: estado.justificante, metodo: estado.metodo || undefined })
             return true
         }
+        case 'destino_firmado': {
+            const a = await getAccion(s.ctx, estado.accionId)
+            if (!a || a.estado !== 'pendiente') { await guardarEstado(s, null); return false }
+            // ¿Es un número de albarán o factura?
+            const albs = await buscarDocumentoPorNumero(s.ctx, 'albaran', texto)
+            const facs = albs.length === 1 ? [] : await buscarDocumentoPorNumero(s.ctx, 'factura', texto)
+            const doc = albs.length === 1 ? { tipo: 'albaran', d: albs[0] } : facs.length === 1 ? { tipo: 'factura', d: facs[0] } : null
+            if (!doc) { await guardarEstado(s, null); return false } // no es un número: que lo trate la IA
+            let factura_numero: string | null = null
+            if (doc.tipo === 'albaran' && doc.d.factura_id) factura_numero = (await s.ctx.supabase.from('facturas').select('numero').eq('id', doc.d.factura_id).maybeSingle()).data?.numero || null
+            const destino = { tipo: doc.tipo, id: doc.d.id, numero: doc.d.numero, cliente: doc.d.cliente_razon_social, fecha: doc.d.fecha, total: Number(doc.d.total || 0), factura_numero, puntos: 999, motivo: 'elegido por ti' }
+            const acc = await actualizarPayload(s.ctx, a.id, { destino, candidatos: [destino, ...(a.payload.candidatos || []).filter((c: any) => c.id !== destino.id)].slice(0, 4) })
+            if (acc) await mostrarFirmado(s, acc)
+            return true
+        }
         case 'buscar_cliente':
             await guardarEstado(s, null)
             await cmdCliente(s, texto)
@@ -574,6 +786,22 @@ async function procesarTexto(s: Sesion, texto: string) {
         case '/gasto': return enviar(s.chatId, '📷 Mándame una <b>foto del ticket</b> o el <b>PDF de la factura</b> del proveedor.\nTambién puedes escribirlo o dictarlo: «gasto de 60 € en gasolina, IVA 21%».')
         case '/buscar': return arg ? procesarConIA(s, `Busca en el ERP: ${arg}`) : enviar(s.chatId, 'Escribe qué buscar: <code>/buscar tornillos</code>')
         case '/notificaciones': return panelNotificaciones(s)
+        case '/informe': case '/informes': {
+            if (!arg) return cmdInforme(s)
+            const mes = mesDeTexto(arg)
+            if (mes) return cmdInforme(s, 'mes', mes)
+            const t = arg.toLowerCase()
+            const preset = /trimestre anterior|trim.*pasad/.test(t) ? 'trimestre_anterior' : /trimestre/.test(t) ? 'trimestre' : /año anterior|año pasado/.test(t) ? 'ano_anterior' : /año/.test(t) ? 'este_ano' : /mes anterior|mes pasado/.test(t) ? 'mes_anterior' : /mes/.test(t) ? 'este_mes' : null
+            return preset ? cmdInforme(s, preset) : procesarConIA(s, `Informe: ${arg}`)
+        }
+        case '/albaranes': case '/albaran': return arg ? procesarConIA(s, `Muéstrame el albarán ${arg}`) : cmdAlbaranes(s)
+        case '/firmados': return cmdFirmados(s)
+        case '/firmado': {
+            if (!tienePermiso(s.ctx.rol, 'documentos')) return enviar(s.chatId, 'Tu rol no permite subir documentos firmados.')
+            await guardarEstado(s, { esperando: 'firmado', desde: new Date().toISOString() })
+            return enviar(s.chatId, '✍️ Mándame la <b>foto o el PDF</b> del albarán o parte firmado por el cliente. Lo leo y te pregunto a qué albarán o factura lo unimos.')
+        }
+        case '/expediente': return arg ? procesarConIA(s, `Pásame el expediente de la factura ${arg}`) : enviar(s.chatId, 'Escribe la factura: <code>/expediente F-42</code>')
         case '/desvincular': return enviar(s.chatId, '¿Seguro que quieres desconectar este chat del ERP?', [[{ text: 'Sí, desvincular', callback_data: 'desv:si' }, { text: 'No', callback_data: 'm:inicio' }]])
     }
     if (cmd.startsWith('/')) return enviar(s.chatId, 'No conozco ese comando. Escribe /ayuda.', botonesNav)
@@ -604,7 +832,8 @@ async function procesarConIA(s: Sesion, texto: string) {
         const a = await getAccion(s.ctx, r.accion.id)
         if (a) return mostrarAccion(s, a, markdownATelegram(r.texto))
     }
-    return enviar(s.chatId, markdownATelegram(r.texto))
+    await enviar(s.chatId, markdownATelegram(r.texto))
+    return enviarArchivosPedidos(s, r.archivos)
 }
 
 async function panelNotificaciones(s: Sesion, editarMsg?: number) {
@@ -641,7 +870,35 @@ async function procesarCallback(s: Sesion, cb: any) {
             case 'gasto': return procesarTexto(s, '/gasto')
             case 'ayuda': return enviar(s.chatId, AYUDA, botonesNav)
             case 'notif': return panelNotificaciones(s)
+            case 'informe': return cmdInforme(s)
+            case 'albaranes': return cmdAlbaranes(s)
+            case 'firmados': return cmdFirmados(s)
+            case 'firmado': return procesarTexto(s, '/firmado')
         }
+        return
+    }
+    if (tipo === 'inf') { await responderCallback(cb.id, 'Calculando…'); return a1 === 'm' ? cmdInforme(s, 'mes', a2) : cmdInforme(s, a1) }
+    if (tipo === 'alb') { await responderCallback(cb.id); return detalleAlbaran(s, a1) }
+    if (tipo === 'cnv') { await responderCallback(cb.id); return prepararConversion(s, a1, a2) }
+    if (tipo === 'pac') { await responderCallback(cb.id); return prepararEstadoPresupuesto(s, a1, true) }
+    if (tipo === 'fir') {
+        await responderCallback(cb.id)
+        await guardarEstado(s, { esperando: 'firmado', albaranId: a1, desde: new Date().toISOString() })
+        return enviar(s.chatId, '✍️ Mándame la foto o el PDF del albarán firmado.')
+    }
+    if (tipo === 'exp') {
+        await responderCallback(cb.id, 'Preparando el expediente…')
+        const { data: f } = await s.ctx.supabase.from('facturas').select('id, numero').eq('id', a1).maybeSingle()
+        if (!f) return enviar(s.chatId, 'Factura no encontrada.')
+        return enviarArchivosPedidos(s, [{ tipo: 'expediente', id: f.id, numero: f.numero, url: '' }])
+    }
+    if (tipo === 'frm') {
+        const acc0 = await getAccion(s.ctx, a1)
+        if (!acc0 || acc0.estado !== 'pendiente') { await responderCallback(cb.id, 'Esta confirmación ha caducado.', true); return }
+        const destino = a2 === 'x' ? null : (acc0.payload.candidatos || [])[Number(a2)] || null
+        const acc = await actualizarPayload(s.ctx, a1, { destino })
+        await responderCallback(cb.id, destino ? `${destino.numero}` : 'Sin unir')
+        if (acc) return mostrarFirmado(s, acc, msgId)
         return
     }
 
@@ -656,18 +913,19 @@ async function procesarCallback(s: Sesion, cb: any) {
     }
     if (tipo === 'pdf') {
         await responderCallback(cb.id, 'Generando PDF…')
-        const tipoDoc = a1 === 'p' ? 'presupuesto' : 'factura'
-        const { data: doc } = await s.ctx.supabase.from(tipoDoc === 'factura' ? 'facturas' : 'presupuestos').select('*').eq('id', a2).maybeSingle()
+        const tipoDoc = a1 === 'p' ? 'presupuesto' : a1 === 'a' ? 'albaran' : 'factura'
+        const { data: doc } = await s.ctx.supabase.from(tipoDoc === 'factura' ? 'facturas' : tipoDoc === 'albaran' ? 'albaranes' : 'presupuestos').select('*').eq('id', a2).maybeSingle()
         if (!doc) return enviar(s.chatId, 'Documento no encontrado.')
         await escribiendo(s.chatId, 'upload_document')
         const pdf = await pdfDeDocumento(doc, tipoDoc, s.ctx)
-        return enviarDocumento(s.chatId, pdf, nombreArchivo(doc, tipoDoc), `${tipoDoc === 'factura' ? 'Factura' : 'Presupuesto'} <b>${esc(doc.numero)}</b> · ${esc(doc.cliente_razon_social)}`)
+        return enviarDocumento(s.chatId, pdf, nombreArchivo(doc, tipoDoc), `${tipoDoc === 'factura' ? 'Factura' : tipoDoc === 'albaran' ? 'Albarán' : 'Presupuesto'} <b>${esc(doc.numero)}</b> · ${esc(doc.cliente_razon_social)}`)
     }
     if (tipo === 'ok' || tipo === 'no') {
         const accion = await getAccion(s.ctx, a1)
         if (!accion) { await responderCallback(cb.id, 'Este botón ya no es válido.', true); return }
         if (tipo === 'no') {
             await cancelarAccion(s.ctx, a1)
+            if (s.link.estado_conversacion?.accionId === a1) await guardarEstado(s, null)
             await responderCallback(cb.id, 'Cancelado')
             if (msgId) await editar(s.chatId, msgId, esc(accion.resumen) + '\n\n❌ <b>Cancelado.</b> No se ha hecho nada.')
             return
@@ -675,7 +933,10 @@ async function procesarCallback(s: Sesion, cb: any) {
         await responderCallback(cb.id, 'Procesando…')
         if (msgId) await editar(s.chatId, msgId, esc(accion.resumen) + '\n\n⏳ Procesando…')
         const r = await ejecutarAccion(s.ctx, a1)
-        if (msgId) await editar(s.chatId, msgId, esc(accion.resumen) + `\n\n${esc(r.mensaje)}`, r.ok ? botonesNav : tecladoAccion(accion))
+        if (accion.tipo === 'firmado' && s.link.estado_conversacion?.accionId === a1) await guardarEstado(s, null)
+        const creado = r.ok && r.datos?.id && r.datos?.tipo && ['documento', 'convertir'].includes(accion.tipo)
+        const tras: Teclado = creado ? [[{ text: `📎 PDF ${r.datos.numero}`, callback_data: `pdf:${r.datos.tipo === 'factura' ? 'f' : r.datos.tipo === 'albaran' ? 'a' : 'p'}:${r.datos.id}` }], ...botonesNav] : botonesNav
+        if (msgId) await editar(s.chatId, msgId, esc(accion.resumen) + `\n\n${esc(r.mensaje)}`, r.ok ? tras : tecladoAccion(accion))
         else await enviar(s.chatId, esc(r.mensaje), botonesNav)
         // El asistente ve el resultado en su memoria para no volver a proponerlo.
         const hist = Array.isArray(s.link.conversation) ? s.link.conversation : []

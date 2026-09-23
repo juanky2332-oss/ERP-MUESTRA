@@ -8,13 +8,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types src/lib/cobros/vencimientos.test.ts src/lib/calculadora/calculo.test.ts",
+    "test": "node --test --experimental-strip-types src/lib/cobros/vencimientos.test.ts src/lib/calculadora/calculo.test.ts src/lib/informes/calcular.test.ts",
     "test:seguridad": "node scripts/pruebas/test_seguridad.js",
     "test:app": "node scripts/pruebas/test_app.js",
     "test:telegram": "node scripts/pruebas/test_telegram.js",
     "test:ui": "node scripts/pruebas/test_ui.js",
     "test:calculadora": "node scripts/pruebas/test_calculadora_marca.js",
-    "test:correo": "node scripts/pruebas/test_correo_libre.js"
+    "test:correo": "node scripts/pruebas/test_correo_libre.js",
+    "test:telegram-total": "node scripts/pruebas/test_telegram_total.js",
+    "test:firmados": "node scripts/pruebas/test_firmados_informes_ui.js",
+    "test:logo": "node scripts/pruebas/test_logo_foto.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -46,6 +49,7 @@
     "nodemailer": "^7.0.12",
     "openai": "^6.16.0",
     "pdf-extraction": "^1.0.2",
+    "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "radix-ui": "^1.4.3",
     "react": "19.2.3",

@@ -176,12 +176,12 @@
 
               let file: File
 
-              if (type === 'albaran_firmado' || (type === 'albaran' && data.documento_firmado_url)) {
-                  // Fetch the existing signed PDF
-                  const url = data.documento_firmado_url
-                  const response = await fetch(url)
+              if (type === 'albaran_firmado' && data.documento_firmado_url) {
+                  // Copia firmada por el cliente (foto o PDF, con su extensión real)
+                  const response = await fetch(data.documento_firmado_url)
                   const blob = await response.blob()
-                  file = new File([blob], `Albaran_Firmado_${data.numero}.pdf`, { type: 'application/pdf' })
+                  const ext = blob.type.includes('pdf') ? 'pdf' : blob.type.includes('png') ? 'png' : 'jpg'
+                  file = new File([blob], `Albaran_Firmado_${data.numero}.${ext}`, { type: blob.type || 'application/pdf' })
               } else {
                   // Generate PDF
                   const pdfBlob = await generatePDF(data, type as any, 'blob') as Blob
