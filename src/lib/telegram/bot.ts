@@ -1051,6 +1051,8 @@ async function vincular(chatId: string, message: any, texto: string) {
     }
 }
 
+let comandosActualizados = false
+
 /** Procesa un update de Telegram (mensaje o pulsación de botón). */
 export async function procesarUpdate(update: any) {
     const cb = update.callback_query
@@ -1086,6 +1088,8 @@ export async function procesarUpdate(update: any) {
         return enviar(chatId, `⚠️ ${esc(e?.message || 'Tu usuario ya no tiene acceso al ERP.')}`)
     }
     const s: Sesion = { ctx, link: link as Link, chatId }
+    // Mantener actualizado el menú «/» del bot (una vez por arranque del servidor)
+    if (!comandosActualizados) { comandosActualizados = true; configurarComandos().catch(() => { comandosActualizados = false }) }
 
     try {
         if (cb) return await procesarCallback(s, cb)
