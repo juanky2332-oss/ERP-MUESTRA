@@ -7,6 +7,7 @@ import { resumenDelMes } from '@/lib/telegram/bot'
 import { resumenCobros } from '@/lib/cobros/servidor'
 import { hoyISO, sumarDias } from '@/lib/cobros/vencimientos'
 import { formatCurrency } from '@/lib/utils'
+import { preferencias } from '@/lib/telegram/preferencias'
 
 export const maxDuration = 300
 
@@ -32,7 +33,8 @@ export async function GET(req: NextRequest) {
 
     for (const link of links || []) {
         if (!link.user_id || !link.chat_id) continue
-        const n = { resumen_diario: true, vencidas: true, vencen_pronto: true, cobros: true, gastos_revisar: true, presupuestos_caducan: true, ...(link.notificaciones || {}) }
+        const n = preferencias(link.notificaciones)
+        if (!n.avisos_diarios) continue
         try {
             const ctx = await getContextoDeUsuario(link.user_id, 'cron', link.id)
             const eco = tienePermiso(ctx.rol, 'economico')

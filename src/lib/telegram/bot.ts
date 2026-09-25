@@ -22,6 +22,7 @@ import { variacion } from '@/lib/informes/calcular'
 import { leerDocumentoFirmado, sugerirVinculos, estadoFirmas, dossierFactura, etiquetaTipo } from '@/lib/firmados/servidor'
 import { moduloActivo } from '@/lib/modulos'
 import type { ArchivoPedido } from '@/lib/ai/erp-assistant'
+import { AVISOS, preferencias, esClavePreferencia, type ClaveAviso } from '@/lib/telegram/preferencias'
 
 const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL || 'https://erp-muestra.vercel.app'
 const MAX_HISTORIAL = 10
@@ -837,14 +838,12 @@ async function procesarConIA(s: Sesion, texto: string) {
 }
 
 async function panelNotificaciones(s: Sesion, editarMsg?: number) {
-    const n = { resumen_diario: true, vencidas: true, vencen_pronto: true, cobros: true, gastos_revisar: true, presupuestos_caducan: true, ...(s.link.notificaciones || {}) }
-    const etiquetas: Record<string, string> = {
-        resumen_diario: 'Resumen diario (8:00)', vencidas: 'Facturas vencidas', vencen_pronto: 'Vencen en 3 días',
-        cobros: 'Cobros registrados', gastos_revisar: 'Gastos por revisar', presupuestos_caducan: 'Presupuestos que caducan',
-    }
-    const teclado: Teclado = Object.keys(etiquetas).map(k => [{ text: `${(n as any)[k] ? '🔔' : '🔕'} ${etiquetas[k]}`, callback_data: `ntf:${k}` }])
+    const n = preferencias(s.link.notificaciones)
+    const teclado: Teclado = [[{ text: `${n.avisos_diarios ? '✅' : '⛔'} Avisos diarios de pendientes: ${n.avisos_diarios ? 'ACTIVADOS' : 'DESACTIVADOS'}`, callback_data: 'ntf:avisos_diarios' }]]
+    for (const k of Object.keys(AVISOS) as ClaveAviso[]) teclado.push([{ text: `${n[k] ? '🔔' : '🔕'} ${AVISOS[k]}`, callback_data: `ntf:${k}` }])
     teclado.push([{ text: '🏠 Inicio', callback_data: 'm:inicio' }])
-    const texto = '🔔 <b>Avisos por Telegram</b>\nPulsa para activar o desactivar cada aviso.'
+    const texto = '🔔 <b>Avisos por Telegram</b>\nPulsa para activar o desactivar cada aviso.' +
+        (n.avisos_diarios ? '' : '\n\n⛔ Los avisos diarios de las 8:00 están apagados (también desde Ajustes en la web).')
     if (editarMsg) return editar(s.chatId, editarMsg, texto, teclado)
     return enviar(s.chatId, texto, teclado)
 }
@@ -1008,7 +1007,8 @@ async function procesarCallback(s: Sesion, cb: any) {
         return enviar(s.chatId, '🕑 ¿Para cuándo? Escribe por ejemplo <code>25/09 10:30</code> o <code>mañana 17:00</code>.')
     }
     if (tipo === 'ntf') {
-        const actual = { resumen_diario: true, vencidas: true, vencen_pronto: true, cobros: true, gastos_revisar: true, presupuestos_caducan: true, ...(s.link.notificaciones || {}) } as Record<string, boolean>
+        if (!esClavePreferencia(a1)) return responderCallback(cb.id)
+        const actual = preferencias(s.link.notificaciones)
         actual[a1] = !actual[a1]
         s.link.notificaciones = actual
         await createAdminClient().from('telegram_links').update({ notificaciones: actual }).eq('id', s.link.id)

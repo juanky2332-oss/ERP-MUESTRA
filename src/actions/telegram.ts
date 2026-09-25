@@ -6,6 +6,7 @@ import { getContexto, mensajeError } from '@/lib/auth'
 import { createAdminClient } from '@/lib/supabase/server'
 import { auditar } from '@/lib/auditoria'
 import { enviar } from '@/lib/telegram/api'
+import { preferencias, esClavePreferencia, type Preferencias } from '@/lib/telegram/preferencias'
 
 function randomCode(length = 6): string {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // sin caracteres ambiguos
@@ -32,10 +33,11 @@ export async function getTelegramStatus() {
             pendingExpiresAt: !data?.linked ? data?.code_expires_at : null,
             telegramUsername: data?.telegram_username || null,
             linkedAt: data?.linked_at || null,
+            notificaciones: preferencias(data?.notificaciones),
             botUsername: process.env.TELEGRAM_BOT_USERNAME || 'ERP_PRUEBA_bot',
         }
     } catch {
-        return { linked: false, pendingCode: null, pendingExpiresAt: null, telegramUsername: null, linkedAt: null, botUsername: process.env.TELEGRAM_BOT_USERNAME || 'ERP_PRUEBA_bot' }
+        return { linked: false, pendingCode: null, pendingExpiresAt: null, telegramUsername: null, linkedAt: null, notificaciones: preferencias(), botUsername: process.env.TELEGRAM_BOT_USERNAME || 'ERP_PRUEBA_bot' }
     }
 }
 
@@ -77,6 +79,24 @@ export async function disconnectTelegram() {
         await auditar(ctx, 'telegram_desvinculado', { tipo: 'telegram' }, { desde: 'web' })
         revalidatePath('/ajustes')
         return { success: true }
+    } catch (e) {
+        return { success: false, error: mensajeError(e) }
+    }
+}
+
+/** Activa o desactiva un aviso de Telegram del usuario actual (`avisos_diarios` = interruptor general). */
+export async function setTelegramAviso(clave: string, activo: boolean) {
+    try {
+        if (!esClavePreferencia(clave)) return { success: false, error: 'Aviso desconocido' }
+        const ctx = await getContexto()
+        const admin = createAdminClient()
+        const { data: link } = await admin.from('telegram_links').select('id, notificaciones').eq('user_id', ctx.userId).eq('linked', true).maybeSingle()
+        if (!link) return { success: false, error: 'Primero vincula tu Telegram.' }
+        const nuevas: Preferencias = { ...preferencias(link.notificaciones), [clave]: activo }
+        const { error } = await admin.from('telegram_links').update({ notificaciones: nuevas }).eq('id', link.id)
+        if (error) throw error
+        revalidatePath('/ajustes')
+        return { success: true, notificaciones: nuevas }
     } catch (e) {
         return { success: false, error: mensajeError(e) }
     }
