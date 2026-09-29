@@ -5,7 +5,7 @@ import { getNextSequenceNumber } from '@/lib/sequences'
 import { getContexto, assertPermiso, mensajeError, type Contexto } from '@/lib/auth'
 import { auditar } from '@/lib/auditoria'
 import { crearDocumento } from '@/lib/documentos/crear'
-import { calcularVencimiento, condicionDeCliente, describirCondicion, etiquetaMetodo } from '@/lib/cobros/vencimientos'
+import { calcularVencimiento, condicionDeCliente, describirCondicion, etiquetaMetodo, hoyISO, sumarDias } from '@/lib/cobros/vencimientos'
 
 type Tipo = 'presupuesto' | 'albaran' | 'factura'
 
@@ -182,8 +182,8 @@ export async function duplicarPresupuesto(id: string) {
         const { data: p } = await ctx.supabase.from('presupuestos').select('*').eq('id', id).maybeSingle()
         if (!p) throw new Error('Presupuesto no encontrado')
         const { id: _id, numero, created_at, updated_at, statuses, estado_vida, es_enviado, enviado, enviado_email, aceptado, rechazado, fecha_envio, pdf_url, empresa_id, ...resto } = p
-        const hoy = new Date().toISOString().slice(0, 10)
-        const r = await createDocument({ ...resto, fecha: hoy, fecha_validez: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), estado: 'borrador' }, 'presupuesto')
+        const hoy = hoyISO()
+        const r = await createDocument({ ...resto, fecha: hoy, fecha_validez: sumarDias(hoyISO(), 30), estado: 'borrador' }, 'presupuesto')
         if (!r.success) throw new Error((r.error as any)?.message)
         await auditar(ctx, 'presupuesto_duplicado', { tipo: 'presupuesto', id, ref: numero }, { nuevo: r.data.numero })
         return { success: true, numero: r.data.numero as string }

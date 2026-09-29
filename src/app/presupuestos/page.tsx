@@ -38,6 +38,7 @@ import { Switch } from "@/components/ui/switch"
 import { supabase } from '@/lib/supabase'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { hoyISO } from '@/lib/cobros/vencimientos'
 
 export default function PresupuestosPage() {
     const { month, year } = useGlobalFilter()
@@ -230,7 +231,7 @@ export default function PresupuestosPage() {
                                                         {budget.statuses?.includes('enviado') && <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-200 shadow-none font-bold">Enviado</Badge>}
                                                         {(budget as any).aceptado && <Badge className="bg-emerald-600 text-white shadow-none font-bold">Aceptado</Badge>}
                                                         {(budget as any).rechazado && <Badge className="bg-rose-100 text-rose-700 shadow-none font-bold">Rechazado</Badge>}
-                                                        {!(budget as any).aceptado && !(budget as any).rechazado && !budget.statuses?.includes('traspasado') && (budget as any).fecha_validez && (budget as any).fecha_validez < new Date().toISOString().slice(0, 10) && <Badge className="bg-slate-200 text-slate-600 shadow-none font-bold">Caducado</Badge>}
+                                                        {!(budget as any).aceptado && !(budget as any).rechazado && !budget.statuses?.includes('traspasado') && (budget as any).fecha_validez && (budget as any).fecha_validez < hoyISO() && <Badge className="bg-slate-200 text-slate-600 shadow-none font-bold">Caducado</Badge>}
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>

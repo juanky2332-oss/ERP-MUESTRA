@@ -7,6 +7,7 @@ import { auditar } from '@/lib/auditoria'
 import { obtenerMercado } from '@/lib/calculadora/mercado'
 import { MATERIALES, INDICES_REFERENCIA, precioConMercado, type Material } from '@/lib/calculadora/materiales'
 import { createDocument } from '@/actions/documents'
+import { hoyISO, sumarDias } from '@/lib/cobros/vencimientos'
 
 /** Configuración de la calculadora de la empresa + cotizaciones de hoy. */
 export async function getCalculadora() {
@@ -162,8 +163,8 @@ export async function guardarCalculo(datos: {
             const ivaImporte = Math.round(base * iva) / 100
             const { data: emp } = await ctx.supabase.from('empresas').select('condiciones_presupuesto').eq('id', ctx.empresaId).maybeSingle()
             const r = await createDocument({
-                fecha: new Date().toISOString().slice(0, 10),
-                fecha_validez: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+                fecha: hoyISO(),
+                fecha_validez: sumarDias(hoyISO(), 30),
                 cliente_id: c.id, cliente_razon_social: c.razon_social, cliente_cif: c.cif, cliente_direccion: c.direccion,
                 cliente_telefono: c.telefono, cliente_email: c.email, cliente_codigo_postal: c.codigo_postal, cliente_ciudad: c.ciudad, cliente_provincia: c.provincia,
                 lineas: [{ descripcion: datos.descripcionLinea, cantidad: datos.cantidad, precio_unitario: datos.precioUnidad, importe: base }],

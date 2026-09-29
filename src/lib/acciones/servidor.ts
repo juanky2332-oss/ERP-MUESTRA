@@ -7,7 +7,7 @@ import { enviarDocumentoPorCorreo, pdfDeDocumento, nombreArchivo, TABLA, NOMBRE,
 import { enviarCorreo, getEmpresa, registrarEnvio } from '@/lib/email/mailer'
 import { registrarCobro } from '@/lib/cobros/servidor'
 import { crearGasto } from '@/lib/gastos/servidor'
-import { etiquetaMetodo } from '@/lib/cobros/vencimientos'
+import { etiquetaMetodo, hoyISO } from '@/lib/cobros/vencimientos'
 import { getNextSequenceNumber } from '@/lib/sequences'
 import { auditar } from '@/lib/auditoria'
 import { notificarCobroTelegram } from '@/lib/telegram/notificaciones'
@@ -208,7 +208,7 @@ async function ejecutarSegunTipo(ctx: Contexto, a: Accion): Promise<ResultadoAcc
             const { data: ins, error } = await ctx.supabase.from('presupuestos').insert({
                 empresa_id: ctx.empresaId,
                 numero,
-                fecha: new Date().toISOString().slice(0, 10),
+                fecha: hoyISO(),
                 fecha_validez: p.fecha_validez || null,
                 cliente_id: contacto.id,
                 cliente_razon_social: contacto.razon_social,
@@ -240,7 +240,7 @@ async function ejecutarSegunTipo(ctx: Contexto, a: Accion): Promise<ResultadoAcc
             const { data: c } = await ctx.supabase.from('contactos').select('*').eq('id', p.clienteId).maybeSingle()
             if (!c) throw new Error('El cliente ya no existe.')
             const doc = await crearDocumento(ctx, {
-                empresa_id: ctx.empresaId, fecha: new Date().toISOString().slice(0, 10),
+                empresa_id: ctx.empresaId, fecha: hoyISO(),
                 cliente_id: c.id, cliente_razon_social: c.razon_social, cliente_cif: c.cif, cliente_direccion: c.direccion, cliente_telefono: c.telefono,
                 cliente_email: c.email_facturacion || c.email, cliente_codigo_postal: c.codigo_postal, cliente_ciudad: c.ciudad, cliente_provincia: c.provincia,
                 pedido_referencia: p.pedido_referencia || null, lineas: p.lineas, subtotal: p.base, base_imponible: p.base,
@@ -253,7 +253,7 @@ async function ejecutarSegunTipo(ctx: Contexto, a: Accion): Promise<ResultadoAcc
             const { data: o } = await ctx.supabase.from(TABLA[p.origenTipo as TipoDocumento]).select('*').eq('id', p.origenId).maybeSingle()
             if (!o) throw new Error('El documento de origen ya no existe.')
             const campos = ['cliente_id', 'cliente_razon_social', 'cliente_cif', 'cliente_direccion', 'cliente_telefono', 'cliente_email', 'cliente_codigo_postal', 'cliente_ciudad', 'cliente_provincia', 'pedido_referencia', 'lineas', 'subtotal', 'base_imponible', 'iva_porcentaje', 'iva_importe', 'total', 'observaciones']
-            const datos: any = { empresa_id: ctx.empresaId, fecha: new Date().toISOString().slice(0, 10) }
+            const datos: any = { empresa_id: ctx.empresaId, fecha: hoyISO() }
             for (const k of campos) if (o[k] !== undefined) datos[k] = o[k]
             if (p.origenTipo === 'presupuesto' && p.destino === 'factura') datos.presupuesto_id = o.id
             else { datos.source_document_id = o.id; datos.source_document_type = p.origenTipo }

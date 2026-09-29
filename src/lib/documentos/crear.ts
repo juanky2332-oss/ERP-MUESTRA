@@ -2,7 +2,7 @@ import 'server-only'
 import { getNextSequenceNumber } from '@/lib/sequences'
 import { assertPermiso, type Contexto } from '@/lib/auth'
 import { auditar } from '@/lib/auditoria'
-import { calcularVencimiento, condicionDeCliente, describirCondicion, etiquetaMetodo } from '@/lib/cobros/vencimientos'
+import { calcularVencimiento, condicionDeCliente, describirCondicion, etiquetaMetodo, hoyISO } from '@/lib/cobros/vencimientos'
 import { propagarFirmasAFactura } from '@/lib/firmados/servidor'
 
 /**
@@ -17,6 +17,18 @@ export const tableMap: Record<Tipo, string> = {
     presupuesto: 'presupuestos',
     albaran: 'albaranes',
     factura: 'facturas',
+}
+
+/**
+ * Fecha del documento como 'YYYY-MM-DD' en hora de España. El formulario web
+ * manda un Date (medianoche local, que en UTC aún es el día anterior) y
+ * El Maikel/Telegram mandan texto; todo acaba en el mismo día natural.
+ */
+export function fechaDocumento(f: unknown): string {
+    if (typeof f === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f)) return f
+    if (!f) return hoyISO()
+    const d = f instanceof Date ? f : new Date(String(f))
+    return isNaN(d.getTime()) ? hoyISO() : hoyISO(d)
 }
 
 function permisoPara(ctx: Contexto, type: Tipo) {
@@ -61,7 +73,7 @@ export async function crearDocumento(ctx: Contexto, data: any, type: Tipo) {
             ...cleanData
         } = data
 
-        const payloadToInsert: any = { ...cleanData }
+        const payloadToInsert: any = { ...cleanData, fecha: fechaDocumento(cleanData.fecha) }
 
         // Evitar conversiones duplicadas: un presupuesto solo se convierte en un
         // albarán, y un albarán solo en una factura.
@@ -89,7 +101,7 @@ export async function crearDocumento(ctx: Contexto, data: any, type: Tipo) {
             statuses: ['pendiente'],
             estado_vida: 'Pendiente',
             created_at: new Date().toISOString(),
-            fecha: payloadToInsert.fecha || new Date().toISOString(),
+            fecha: payloadToInsert.fecha,
             ...(type === 'factura' ? { importe_cobrado: 0, estado_cobro: 'pendiente' } : {}),
         }
 

@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useForm, useFieldArray, useWatch } from 'react-hook-form'
+import { useForm, useFieldArray, useWatch, type FieldErrors } from 'react-hook-form'
+import { toast } from 'sonner'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ import { DocumentPreviewModal } from './document-preview-modal'
 import { CatalogoPicker } from '@/components/catalogo/catalogo-picker'
 import { previsualizarVencimiento } from '@/actions/documents'
 import { useEmpresa } from '@/hooks/use-empresa'
+import { hoyISO, sumarDias } from '@/lib/cobros/vencimientos'
 
 // Schema
 const lineItemSchema = z.object({
@@ -99,7 +101,7 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
     const [vencimiento, setVencimiento] = useState<string>(initialData?.fecha_vencimiento || '')
     const [vencimientoManual, setVencimientoManual] = useState<boolean>(!!initialData?.fecha_vencimiento)
     const [condicionTexto, setCondicionTexto] = useState<string | null>(null)
-    const [fechaValidez, setFechaValidez] = useState<string>(initialData?.fecha_validez || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+    const [fechaValidez, setFechaValidez] = useState<string>(initialData?.fecha_validez || sumarDias(hoyISO(), 30))
     const clienteIdWatch = useWatch({ control: form.control, name: 'cliente_id' })
     const fechaWatch = useWatch({ control: form.control, name: 'fecha' })
 
@@ -159,9 +161,15 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
         await onSubmit(payload, client)
     }
 
+    // Sin esto, guardar sin cliente o con una línea vacía no hacía nada y no decía por qué.
+    const avisarErrores = (errores: FieldErrors) => {
+        const linea = Array.isArray(errores.lineas) ? errores.lineas.find(Boolean) : null
+        toast.error(String(errores.cliente_id?.message || (linea as FieldErrors | null)?.descripcion?.message || errores.lineas?.message || 'Revisa los datos del documento'))
+    }
+
     return (
         <Form {...form}>
-            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-8">
+            <form onSubmit={form.handleSubmit(handleSubmit, avisarErrores)} className="space-y-8">
 
                 {/* Header Actions */}
                 <div className="flex justify-between items-center mb-6">
@@ -300,6 +308,7 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
                                     // Removed logic that fetched address info based on id, it should be passed using onChange from client component
                                 }}
                             />
+                            {form.formState.errors.cliente_id && <p className="mt-2 text-sm font-medium text-destructive">{form.formState.errors.cliente_id.message}</p>}
                             {client && (
                                 <div className="mt-4 space-y-1">
                                     <p className="text-sm font-bold text-gray-900">{client.razon_social}</p>
