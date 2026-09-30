@@ -87,7 +87,12 @@ async function parteFirmadoPdf(cliente) {
         await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some(b => /Albarán ALB-96-2026/.test(b.innerText)), { timeout: 15000 })
         await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] button')].find(b => /Albarán ALB-96-2026/.test(b.innerText))?.click())
         await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] button')].find(b => b.innerText.trim() === 'Unir')?.click())
-        await esperar(2500)
+        // El resumen de la factura se recalcula al final; contra producción tarda más que en local.
+        for (let i = 0; i < 20; i++) {
+            await esperar(750)
+            const { data: f } = await admin.from('facturas').select('soportes_firmados').eq('id', fac.id).single()
+            if (!f.soportes_firmados) break
+        }
         const { data: reg2 } = await admin.from('albaranes_firmados').select('albaran_id, factura_id').eq('id', reg.id).single()
         const { data: albF } = await admin.from('albaranes').select('firmado_at, firmado_por').eq('id', alb.id).single()
         const { data: facF2 } = await admin.from('facturas').select('soportes_firmados').eq('id', fac.id).single()

@@ -64,3 +64,17 @@ TELEGRAM_API_BASE=http://localhost:3200 TELEGRAM_BOT_TOKEN=TEST TELEGRAM_WEBHOOK
 9. Albaranes y partes firmados: subir la foto de un albarán firmado → comprobar que propone su albarán → Guardar y unir → en Facturas, botón «Expediente».
 10. Telegram: foto de un albarán con «firmado» en el pie → elegir destino → Guardar; `/informe marzo`; «factura el albarán X» → sí.
 8. Ajustes → Usuarios: crear un usuario Comercial y comprobar que no ve importes ni puede confirmar cobros.
+
+## Resultados 30/09/2026 (proyecto Supabase nuevo, prueba completa en producción)
+
+Base recreada desde `supabase/00…09` en el proyecto `frwzmvzuphwbuhkaofio` (organización Free). Además de las baterías,
+se probó a mano por la interfaz (Chrome) creando datos de demo que se quedan: 3 clientes, 2 proveedores, 4 artículos de
+catálogo, 3 presupuestos (2 aceptados → albarán → factura), 1 factura directa vencida, cobro parcial y total, 1 gasto,
+1 evento, PDFs de los 8 documentos, expediente y envío real de FAC-01-2026 por correo con El Maikel.
+
+- **Unitarias:** 35/35 · **Seguridad:** 26/26 · **App + IA:** 19/19 · **Correo libre:** 4/4 · **Interfaz:** 21/21
+- **Calculadora + marca:** 18/18 · **Firmados + informes:** 33/33 · **Logo:** 6/6 · **Telegram:** 38/38 · **Telegram total:** 31/31
+- Bugs encontrados y corregidos: crear una factura desde la web fallaba siempre («Fecha no válida: Tue Sep 29», la web manda
+  un `Date` y se cortaba como texto); las fechas se guardaban en UTC (entre las 00:00 y las 02:00 los documentos quedaban
+  con el día anterior); guardar un documento sin cliente o con una línea vacía no hacía nada y no avisaba.
+- `test_firmados_informes_ui` esperaba 2,5 s fijos tras «Unir»; contra producción no daba tiempo. Ahora espera a que termine.
