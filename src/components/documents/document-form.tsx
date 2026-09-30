@@ -29,14 +29,14 @@ import { hoyISO, sumarDias } from '@/lib/cobros/vencimientos'
 
 // Schema
 const lineItemSchema = z.object({
-    descripcion: z.string().min(1, 'Descripción requerida'),
+    descripcion: z.string({ error: 'Cada línea necesita una descripción' }).min(1, 'Cada línea necesita una descripción'),
     cantidad: z.coerce.number().min(0),
     precio_unitario: z.coerce.number().min(0),
     importe: z.number().optional()
 })
 
 const documentSchema = z.object({
-    cliente_id: z.string().min(1, 'Selecciona un cliente'),
+    cliente_id: z.string({ error: 'Selecciona un cliente' }).min(1, 'Selecciona un cliente'),
     fecha: z.date(),
     pedido_referencia: z.string().optional(),
     observaciones: z.string().optional(),
