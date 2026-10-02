@@ -843,7 +843,7 @@ async function panelNotificaciones(s: Sesion, editarMsg?: number) {
     for (const k of Object.keys(AVISOS) as ClaveAviso[]) teclado.push([{ text: `${n[k] ? '🔔' : '🔕'} ${AVISOS[k]}`, callback_data: `ntf:${k}` }])
     teclado.push([{ text: '🏠 Inicio', callback_data: 'm:inicio' }])
     const texto = '🔔 <b>Avisos por Telegram</b>\nPulsa para activar o desactivar cada aviso.' +
-        (n.avisos_diarios ? '' : '\n\n⛔ Los avisos diarios de las 8:00 están apagados (también desde Ajustes en la web).')
+        (n.avisos_diarios ? '' : '\n\n⛔ Los avisos diarios de las 8:00 están apagados (también desde Ajustes en la web). Los cobros y los plazos de impuestos siguen según su propio interruptor.')
     if (editarMsg) return editar(s.chatId, editarMsg, texto, teclado)
     return enviar(s.chatId, texto, teclado)
 }
@@ -901,6 +901,17 @@ async function procesarCallback(s: Sesion, cb: any) {
         return
     }
 
+    if (tipo === 'fse') {
+        // «Ya entregado al asesor» desde el aviso fiscal del cron
+        if (!tienePermiso(s.ctx.rol, 'fiscal')) { await responderCallback(cb.id, 'Tu rol no tiene acceso a la parte fiscal.', true); return }
+        const clave = `${a1}|${a2}`
+        const { error } = await s.ctx.supabase.from('fiscal_entregas').upsert({ empresa_id: s.ctx.empresaId, clave, periodo: a1, usuario_id: s.ctx.userId, usuario_nombre: s.ctx.nombre, entregado_at: new Date().toISOString() }, { onConflict: 'empresa_id,clave' })
+        if (error) { await responderCallback(cb.id, 'No se pudo guardar.', true); return }
+        await auditar(s.ctx, 'fiscal_entregado_asesor', { tipo: 'periodo_fiscal', ref: clave })
+        await responderCallback(cb.id, 'Marcado como entregado')
+        if (msgId) await editar(s.chatId, msgId, (cb.message?.text ? esc(cb.message.text) : '🧾 Aviso fiscal') + '\n\n✅ <b>Entregado al asesor.</b> No volveré a avisarte de este periodo.')
+        return
+    }
     if (tipo === 'fac') { await responderCallback(cb.id); return detalleFactura(s, a1) }
     if (tipo === 'cli') { await responderCallback(cb.id); return fichaCliente(s, a1) }
     if (tipo === 'pag') { await responderCallback(cb.id); return prepararCobro(s, a1, null) }

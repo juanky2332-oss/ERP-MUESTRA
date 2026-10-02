@@ -11,6 +11,8 @@ import { cn, formatCurrency } from "@/lib/utils"
 import { KpiCard } from "@/components/ui/kpi-card"
 import { MoneyDisplay } from "@/components/ui/money-display"
 import { OWN_COMPANY } from "@/lib/company"
+import { avisosEmpresa } from "@/lib/fiscal/servidor"
+import { AvisoFiscalBanner } from "@/components/fiscal/aviso-fiscal"
 
 export const dynamic = 'force-dynamic'
 
@@ -20,10 +22,11 @@ async function getStats(monthFilter: string | undefined) {
   const eco = tienePermiso(ctx.rol, 'economico')
   const hoy = hoyISO()
   const rHoy = rangoDiaMadrid(hoy)
-  const [rc, { data: eventosHoy }, { data: gastosMes }] = await Promise.all([
+  const [rc, { data: eventosHoy }, { data: gastosMes }, fiscal] = await Promise.all([
     resumenCobros(ctx),
     supabase.from('eventos').select('id, titulo, tipo, estado, inicio, todo_el_dia, contactos(razon_social)').gte('inicio', rHoy.desde).lte('inicio', rHoy.hasta).neq('estado', 'cancelado').order('inicio'),
     supabase.from('gastos').select('total').gte('fecha', hoy.slice(0, 8) + '01'),
+    tienePermiso(ctx.rol, 'fiscal') ? avisosEmpresa(ctx, hoy).catch(() => null) : Promise.resolve(null),
   ])
 
   const [
@@ -124,6 +127,7 @@ async function getStats(monthFilter: string | undefined) {
     },
     gastosMes: (gastosMes || []).reduce((a: number, g: any) => a + Number(g.total || 0), 0),
     eventosHoy: eventosHoy || [],
+    avisosFiscales: fiscal?.avisos || [],
     eco,
     nombre: ctx.nombre.split(' ')[0],
     presupuestosPendientes: {
@@ -169,6 +173,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             </ul>
           </div>
         </div>
+
+        {stats.avisosFiscales.map(a => <AvisoFiscalBanner key={a.clave} aviso={a} />)}
 
         {stats.eco && hasUrgent && (
           <div className="flex items-center gap-4 bg-rose-600 text-white px-6 py-4 rounded-2xl shadow-lg shadow-rose-600/20">

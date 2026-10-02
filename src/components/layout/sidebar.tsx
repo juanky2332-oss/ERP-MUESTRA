@@ -20,6 +20,7 @@ import {
     CalendarDays,
     BarChart3,
     FileSignature,
+    Landmark,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
@@ -45,6 +46,7 @@ const navItems: NavItem[] = [
     { href: '/cobros', label: 'Cobros y vencimientos', icon: Wallet },
     { href: '/agenda', label: 'Agenda', icon: CalendarDays },
     { href: '/informes', label: 'Informes', icon: BarChart3 },
+    { href: '/fiscal', label: 'Fiscal y asesor', icon: Landmark },
 ]
 
 const secondaryItems: NavItem[] = [

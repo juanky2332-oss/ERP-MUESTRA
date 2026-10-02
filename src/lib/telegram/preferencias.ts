@@ -10,9 +10,13 @@ export const AVISOS = {
     cobros: 'Cobros registrados',
     gastos_revisar: 'Gastos por revisar',
     presupuestos_caducan: 'Presupuestos que caducan',
+    fiscal: 'Plazos de impuestos (facturas para el asesor)',
 } as const
 
 export type ClaveAviso = keyof typeof AVISOS
+
+/** Avisos que NO dependen del interruptor general «avisos diarios» (llegan aunque esté apagado). */
+export const AVISOS_INDEPENDIENTES: ClaveAviso[] = ['cobros', 'fiscal']
 
 /** `avisos_diarios` es el interruptor general: apagado, el cron de las 8:00 no manda nada. */
 export type Preferencias = Record<ClaveAviso | 'avisos_diarios', boolean>
@@ -20,7 +24,7 @@ export type Preferencias = Record<ClaveAviso | 'avisos_diarios', boolean>
 export function preferencias(guardadas?: Record<string, boolean> | null): Preferencias {
     return {
         avisos_diarios: true,
-        resumen_diario: true, vencidas: true, vencen_pronto: true, cobros: true, gastos_revisar: true, presupuestos_caducan: true,
+        resumen_diario: true, vencidas: true, vencen_pronto: true, cobros: true, gastos_revisar: true, presupuestos_caducan: true, fiscal: true,
         ...(guardadas || {}),
     }
 }

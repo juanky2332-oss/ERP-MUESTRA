@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { generateTelegramLinkCode, disconnectTelegram, setTelegramAviso } from '@/actions/telegram'
-import { AVISOS, preferencias, type ClaveAviso, type Preferencias } from '@/lib/telegram/preferencias'
+import { AVISOS, AVISOS_INDEPENDIENTES, preferencias, type ClaveAviso, type Preferencias } from '@/lib/telegram/preferencias'
 
 interface Status {
     linked: boolean
@@ -98,11 +98,11 @@ export function TelegramConnectCard({ initialStatus }: { initialStatus: Status }
                             {(Object.keys(AVISOS) as ClaveAviso[]).map(k => (
                                 <label key={k} className="flex items-center justify-between gap-2 text-xs font-semibold rounded-lg bg-muted/50 px-3 py-2">
                                     {AVISOS[k]}
-                                    <Switch checked={avisos[k]} disabled={guardando !== null || (!avisos.avisos_diarios && k !== 'cobros')} onCheckedChange={v => cambiarAviso(k, v)} />
+                                    <Switch checked={avisos[k]} disabled={guardando !== null || (!avisos.avisos_diarios && !AVISOS_INDEPENDIENTES.includes(k))} onCheckedChange={v => cambiarAviso(k, v)} />
                                 </label>
                             ))}
                         </div>
-                        {!avisos.avisos_diarios && <p className="text-xs text-muted-foreground">Apagado: no recibirás el mensaje de las 8:00. Los avisos al registrar un cobro siguen según su propio interruptor.</p>}
+                        {!avisos.avisos_diarios && <p className="text-xs text-muted-foreground">Apagado: no recibirás el mensaje de las 8:00. Los avisos al registrar un cobro y los plazos de impuestos siguen según su propio interruptor.</p>}
                     </div>
                     <Button variant="outline" className="gap-2 text-rose-600 hover:text-rose-700" disabled={pending} onClick={disconnect}>
                         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlink className="h-4 w-4" />}

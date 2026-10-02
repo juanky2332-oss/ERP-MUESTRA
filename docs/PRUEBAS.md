@@ -9,7 +9,7 @@ Requisitos en `.env.local`: las claves de Supabase y OpenAI, más
 
 | Comando | Qué prueba | Necesita |
 |---|---|---|
-| `npm test` | Vencimientos (30/60/90 días, día fijo, fin de mes, bisiestos, estados de cobro) y calculadora de mecanizado (pesos contra tablas de barras, tubos, pletinas, perfiles IPE; creces, medida comercial, piezas por barra, tiempos, tratamientos, ajuste de precio con el mercado) | nada |
+| `npm test` | Calendario fiscal (plazos AEAT, inhábiles, avisos) y libros registro (orden, huecos de numeración, IVA por tipo, 303/111/115/130/347); vencimientos (30/60/90 días, día fijo, fin de mes, bisiestos, estados de cobro) y calculadora de mecanizado (pesos contra tablas de barras, tubos, pletinas, perfiles IPE; creces, medida comercial, piezas por barra, tiempos, tratamientos, ajuste de precio con el mercado) | nada |
 | `npm run test:seguridad` | RLS y roles directamente contra la base de datos | nada |
 | `npm run test:app` | Páginas, protección de rutas y asistente IA (envío de factura por correo con confirmación) | app arrancada en `BASE` (por defecto `http://localhost:3100`) |
 | `npm run test:telegram` | Bot completo contra un Telegram simulado | app arrancada con las variables de abajo |
@@ -18,6 +18,7 @@ Requisitos en `.env.local`: las claves de Supabase y OpenAI, más
 | `npm run test:telegram-total` | Trabajar todo desde Telegram: informes por periodo, albaranes (facturar, PDF), presupuestos (aceptar, pasar a albarán), albarán/parte firmado por foto o PDF unido a su albarán y factura, expediente PDF, crear albarán en lenguaje natural y confirmar con «sí» | app arrancada como en `test:telegram` |
 | `npm run test:firmados` | En Chrome: subir un parte firmado (la IA lo lee y propone a qué unirlo), cambiar la unión, sello FIRMADO en albaranes, expediente PDF, informes (todos los periodos, pestañas, cliente, mes concreto) y módulos opcionales | app arrancada + Chrome |
 | `npm run test:logo` | Subir como logo una foto de móvil de 8 MB (antes se quedaba cargando) | app arrancada + Chrome |
+| `npm run test:fiscal` | Sección Fiscal: calendario AEAT y aviso a menos de un mes (Inicio, Fiscal y Telegram, también con los avisos diarios apagados), paquete para el asesor en carpeta local (simulada con el almacenamiento privado de Chrome) y en ZIP, PDF resumen, Excel de libros registro cuadrado con la BD, foto de gasto convertida a PDF, «ya entregado» (web y Telegram), régimen autónomo/S.L. y móvil. Crea y borra sus propios datos | app arrancada como en `test:telegram` + Chrome |
 | `npm run test:ui` | Interfaz en Chrome real: cobros, pagos parciales, agenda, catálogo, ficha de cliente, móvil y tema oscuro | app arrancada + Chrome (`CHROME_PATH`) |
 
 `test:app --enviar` además confirma el envío y manda de verdad el correo al cliente de prueba.

@@ -15,6 +15,7 @@ export type Permiso =
     | 'gastos'         // registrar gastos
     | 'cobros'         // confirmar cobros y reclamar pagos
     | 'economico'      // ver importes pendientes, vencidos y avisos de cobro
+    | 'fiscal'         // calendario fiscal y paquete de facturas para el asesor
     | 'agenda'         // gestionar agenda
     | 'enviar'         // enviar correos a clientes
     | 'ajustes'        // configurar empresa y usuarios
@@ -29,13 +30,13 @@ export const ROLES: { value: Rol; label: string; descripcion: string }[] = [
     { value: 'lectura', label: 'Solo lectura', descripcion: 'Consulta limitada' },
 ]
 
-const TODOS: Permiso[] = ['ver', 'documentos', 'presupuestos', 'clientes', 'catalogo', 'gastos', 'cobros', 'economico', 'agenda', 'enviar', 'ajustes', 'ia']
+const TODOS: Permiso[] = ['ver', 'documentos', 'presupuestos', 'clientes', 'catalogo', 'gastos', 'cobros', 'economico', 'fiscal', 'agenda', 'enviar', 'ajustes', 'ia']
 
 const MATRIZ: Record<Rol, Permiso[]> = {
     propietario: TODOS,
     administrador: TODOS,
     administracion: ['ver', 'documentos', 'presupuestos', 'clientes', 'catalogo', 'gastos', 'agenda', 'enviar', 'ia'],
-    finanzas: ['ver', 'cobros', 'economico', 'gastos', 'agenda', 'enviar', 'ia'],
+    finanzas: ['ver', 'cobros', 'economico', 'fiscal', 'gastos', 'agenda', 'enviar', 'ia'],
     comercial: ['ver', 'presupuestos', 'clientes', 'agenda', 'enviar', 'ia'],
     lectura: ['ver'],
 }
