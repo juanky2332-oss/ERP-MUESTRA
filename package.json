@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types src/lib/cobros/vencimientos.test.ts src/lib/calculadora/calculo.test.ts src/lib/informes/calcular.test.ts src/lib/fiscal/fiscal.test.ts src/lib/documentos/totales.test.ts src/lib/ai/catalogo-busqueda.test.ts",
+    "test": "node --test --experimental-strip-types src/lib/cobros/vencimientos.test.ts src/lib/calculadora/calculo.test.ts src/lib/informes/calcular.test.ts src/lib/fiscal/fiscal.test.ts src/lib/documentos/totales.test.ts src/lib/ai/catalogo-busqueda.test.ts src/lib/planos/tipos.test.ts",
     "test:seguridad": "node scripts/pruebas/test_seguridad.js",
     "test:app": "node scripts/pruebas/test_app.js",
     "test:telegram": "node scripts/pruebas/test_telegram.js",
@@ -20,7 +20,8 @@
     "test:logo": "node scripts/pruebas/test_logo_foto.js",
     "test:fiscal": "node scripts/pruebas/test_fiscal.js",
     "test:importes": "node scripts/pruebas/test_importes.js",
-    "test:botones": "node scripts/pruebas/test_botones.js"
+    "test:botones": "node scripts/pruebas/test_botones.js",
+    "test:planos": "node scripts/pruebas/test_planos.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

@@ -9,7 +9,7 @@ const APP = process.env.BASE || 'http://localhost:3100'
 const esperar = ms => new Promise(r => setTimeout(r, ms))
 
 const RUTAS = ['/', '/contactos', '/proveedores', '/catalogo', '/presupuestos', '/presupuestos/new', '/albaranes', '/albaranes/new', '/facturas', '/facturas/new',
-    '/albaranes-firmados', '/cobros', '/gastos', '/gastos/new', '/agenda', '/informes', '/fiscal', '/calculadora', '/emails', '/ajustes']
+    '/albaranes-firmados', '/cobros', '/gastos', '/gastos/new', '/agenda', '/informes', '/fiscal', '/calculadora', '/planos', '/emails', '/ajustes']
 // Nunca se pulsan: tienen efecto real o sacan de la sesión
 const PELIGRO = /eliminar|borrar|anular|enviar|mandar|cerrar sesi|salir|desvincular|confirmar|guardar|crear|registrar|marcar|pagad|subir|importar|restablecer|ya entregado|exportar|descargar|aplicar|actualizar precios|duplicar|reclamar|convertir|facturar|aceptar|rechazar|unir/i
 

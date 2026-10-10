@@ -21,6 +21,7 @@ import {
     BarChart3,
     FileSignature,
     Landmark,
+    ScanLine,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
@@ -55,7 +56,7 @@ const secondaryItems: NavItem[] = [
     { href: '/ajustes', label: 'Ajustes', icon: Settings },
 ]
 
-const ICONOS_MODULO: Record<string, React.ElementType> = { calculadora_mecanizado: Calculator }
+const ICONOS_MODULO: Record<string, React.ElementType> = { calculadora_mecanizado: Calculator, presupuesto_plano: ScanLine }
 
 // 1. EXTRAEMOS LA INTERFAZ AQUÍ ARRIBA
 interface SidebarContentProps {

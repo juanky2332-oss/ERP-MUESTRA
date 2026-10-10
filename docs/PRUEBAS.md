@@ -79,3 +79,22 @@ catálogo, 3 presupuestos (2 aceptados → albarán → factura), 1 factura dire
   un `Date` y se cortaba como texto); las fechas se guardaban en UTC (entre las 00:00 y las 02:00 los documentos quedaban
   con el día anterior); guardar un documento sin cliente o con una línea vacía no hacía nada y no avisaba.
 - `test_firmados_informes_ui` esperaba 2,5 s fijos tras «Unir»; contra producción no daba tiempo. Ahora espera a que termine.
+
+## Revisión completa 10/10/2026
+
+Nuevas baterías: `npm run test:importes` (importes y reglas fiscales de punta a punta), `npm run test:botones`
+(recorre las 21 pantallas y pulsa todos los botones no destructivos buscando errores de JavaScript y peticiones
+fallidas) y `npm run test:planos` (presupuesto desde plano con IA real: pieza, mesa de inox y esquema eléctrico;
+`SOLO=mesa` para un caso, `VER=1` para ver lo leído).
+
+- **Unitarias:** 57/57 · **Seguridad:** 26/26 · **App + IA:** 19/19 · **Telegram:** 38/38 · **Telegram total:** 31/31
+- **Correo:** 4/4 · **Calculadora + marca:** 18/18 · **Interfaz:** 21/21 · **Firmados + informes:** 33/33 · **Logo:** 6/6
+- **Fiscal:** 42/42 · **Importes:** 12/12 · **Planos:** 16/16 (gpt-5.4) · **Botones:** 160 pulsados, 0 errores
+- Bugs corregidos: IVA 0 % pasaba a 21 % (formulario, edición, PDF, OCR); totales sin redondear y líneas con importe 0;
+  gasto dictado solo con el total quedaba con base e IVA a 0; la retención de IRPF de los gastos no se recogía en
+  ningún sitio (modelos 111/115 siempre a 0); se podía borrar cualquier factura (huecos en la numeración y número
+  reutilizado) y su albarán quedaba «traspasado» para siempre; «Beneficio neto» del Inicio sumaba el IVA y las
+  anuladas; numeración por año del reloj del servidor; El Maikel no encontraba artículos del catálogo salvo con la
+  frase exacta; presupuesto → factura sin control de duplicados; diálogo de vista previa sin título accesible.
+- Pruebas que fallaban por la fecha (escritas en septiembre) o por el aviso de vencidas: corregidas.
+- Pregunta-trampa a El Maikel (clientes inexistentes, precios no dados, datos que no hay): no inventa nada.
