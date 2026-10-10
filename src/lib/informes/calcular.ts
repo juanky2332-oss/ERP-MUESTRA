@@ -152,7 +152,9 @@ export function calcularInforme(todo: DatosInforme, p: Periodo, hoy: string, opt
 
     // Ventas por concepto (líneas de factura)
     const lineas = facturas.flatMap(f => (Array.isArray(f.lineas) ? f.lineas : []).map((l: any) => ({ d: String(l.descripcion || '').split('\n')[0].trim().slice(0, 80), imp: n(l.cantidad) * n(l.precio_unitario), cant: n(l.cantidad) })))
-    const porConcepto = agrupar(lineas, l => l.d, l => l.imp).slice(0, 15)
+    const cantidades = new Map<string, number>()
+    for (const l of lineas) { const k = l.d || 'Sin clasificar'; cantidades.set(k, (cantidades.get(k) || 0) + l.cant) }
+    const porConcepto = agrupar(lineas, l => l.d, l => l.imp).slice(0, 15).map(c => ({ ...c, cantidad: Math.round((cantidades.get(c.clave) || 0) * 1000) / 1000 }))
 
     // IVA por trimestre
     const ivaMap = new Map<string, { trimestre: string; repercutido: number; soportado: number; baseVentas: number; baseCompras: number }>()

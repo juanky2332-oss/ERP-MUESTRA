@@ -58,4 +58,6 @@ export const CAMPOS_JSON = `- emisor_nombre: Razón social del EMISOR (quien cob
 - base_imponible: Número.
 - iva_porcentaje: Número (ej: 21).
 - iva_importe: Número.
-- total: Número.`
+- retencion_porcentaje: % de retención de IRPF si la factura la lleva (alquileres 19, profesionales 15 o 7), o 0.
+- retencion_importe: Importe de la retención de IRPF (positivo), o 0.
+- total: Número (el TOTAL A PAGAR que figura en el documento, ya descontada la retención si la hay).`

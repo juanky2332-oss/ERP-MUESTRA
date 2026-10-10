@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { calcularTotales } from '@/lib/documentos/totales'
 import { useForm, useFieldArray, useWatch, type FieldErrors } from 'react-hook-form'
 import { toast } from 'sonner'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -136,11 +137,12 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
     const ivaPct = useWatch({ control: form.control, name: 'iva_porcentaje' })
 
     // Calculate totals
-    const subtotalRaw = lines ? lines.reduce((acc: number, line: any) => acc + (Number(line.cantidad) * Number(line.precio_unitario)), 0) : 0
-
-    const baseImponible = subtotalRaw
-    const ivaAmount = baseImponible * ((Number(ivaPct) || 21) / 100)
-    const total = baseImponible + ivaAmount
+    // Misma fórmula que el servidor y los PDF (redondeo por línea y cuota al céntimo; IVA 0 % válido)
+    const totales = calcularTotales(lines as any, ivaPct)
+    const subtotalRaw = totales.subtotal
+    const baseImponible = totales.base
+    const ivaAmount = totales.ivaImporte
+    const total = totales.total
 
     const handleSubmit = async (data: formValues) => {
         // Inject calculated values
@@ -436,6 +438,26 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
                                 </FormItem>
                             )}
                         />
+                        {type !== 'presupuesto' && totales.ivaPct === 0 && (
+                            <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/20 dark:border-amber-900 dark:text-amber-200">
+                                <p className="font-semibold">Factura sin IVA: la ley exige indicar el motivo (art. 6.1.j RD 1619/2012).</p>
+                                <select
+                                    className="mt-2 w-full rounded border bg-background px-2 py-1.5 text-xs"
+                                    value=""
+                                    onChange={(e) => {
+                                        if (!e.target.value) return
+                                        const obs = form.getValues('observaciones') || ''
+                                        if (!obs.includes(e.target.value)) form.setValue('observaciones', obs ? `${obs}\n${e.target.value}` : e.target.value)
+                                    }}
+                                >
+                                    <option value="">Añadir la mención a observaciones…</option>
+                                    <option value="Inversión del sujeto pasivo (art. 84.Uno.2º.f LIVA).">Inversión del sujeto pasivo (obras/subcontratas)</option>
+                                    <option value="Entrega intracomunitaria exenta (art. 25 LIVA).">Entrega intracomunitaria (cliente UE con NIF-IVA)</option>
+                                    <option value="Exportación exenta (art. 21 LIVA).">Exportación fuera de la UE</option>
+                                    <option value="Operación exenta de IVA (art. 20 LIVA).">Operación exenta (art. 20 LIVA)</option>
+                                </select>
+                            </div>
+                        )}
                     </div>
 
                     <div className="w-full max-w-sm space-y-4 bg-gray-50 p-6 rounded-lg ml-auto">
@@ -450,7 +472,7 @@ export function DocumentForm({ type, initialData, onSubmit, onGeneratePdf }: Doc
                         </div>
 
                         <div className="flex justify-between items-center text-sm text-gray-600">
-                            <span>IVA ({String(ivaPct || 21)}%)</span>
+                            <span>IVA ({String(totales.ivaPct)}%)</span>
                             <span className="font-medium text-gray-900">{ivaAmount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
                         </div>
 

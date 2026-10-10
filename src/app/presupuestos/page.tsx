@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { tipoIva, r2 as redondear2 } from '@/lib/documentos/totales'
 import { useBudgets } from '@/hooks/use-budgets'
 import {
     Table,
@@ -91,7 +92,7 @@ export default function PresupuestosPage() {
 
         updateBudget.mutate({
             id: budget.id,
-            statuses: Array.from(currentStatuses)
+            statuses: Array.from(currentStatuses) as string[]
         })
     }
 
@@ -387,8 +388,8 @@ export default function PresupuestosPage() {
                                 <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={() => {
                                     const lineas = editingBudget.lineas || []
                                     const base = lineas.reduce((acc: number, l: any) => acc + (Number(l.cantidad) * Number(l.precio_unitario)), 0)
-                                    const ivaPct = Number(editingBudget.iva_porcentaje) || 21
-                                    const ivaImporte = base * (ivaPct / 100)
+                                    const ivaPct = tipoIva(editingBudget.iva_porcentaje)
+                                    const ivaImporte = redondear2(base * (ivaPct / 100))
                                     const total = base + ivaImporte
                                     updateBudget.mutate({ id: editingBudget.id, fecha: editingBudget.fecha, pedido_referencia: editingBudget.pedido_referencia, observaciones: editingBudget.observaciones, lineas, base_imponible: base, iva_importe: ivaImporte, total }, { onSuccess: () => setEditOpen(false) })
                                 }}>Guardar Cambios</Button>

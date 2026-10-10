@@ -4,6 +4,7 @@ import { assertPermiso, type Contexto } from '@/lib/auth'
 import { auditar } from '@/lib/auditoria'
 import { calcularVencimiento, condicionDeCliente, describirCondicion, etiquetaMetodo, hoyISO } from '@/lib/cobros/vencimientos'
 import { propagarFirmasAFactura } from '@/lib/firmados/servidor'
+import { calcularTotales } from '@/lib/documentos/totales'
 
 /**
  * Alta de presupuestos, albaranes y facturas (también por conversión:
@@ -29,6 +30,19 @@ export function fechaDocumento(f: unknown): string {
     if (!f) return hoyISO()
     const d = f instanceof Date ? f : new Date(String(f))
     return isNaN(d.getTime()) ? hoyISO() : hoyISO(d)
+}
+
+/** Recalcula base, IVA y total desde las líneas (si las hay) y redondea a céntimos. */
+export function aplicarTotales(d: any) {
+    if (!Array.isArray(d.lineas)) return d
+    const t = calcularTotales(d.lineas, d.iva_porcentaje)
+    d.lineas = t.lineas
+    d.subtotal = t.subtotal
+    d.base_imponible = t.base
+    d.iva_porcentaje = t.ivaPct
+    d.iva_importe = t.ivaImporte
+    d.total = t.total
+    return d
 }
 
 function permisoPara(ctx: Contexto, type: Tipo) {
@@ -74,12 +88,20 @@ export async function crearDocumento(ctx: Contexto, data: any, type: Tipo) {
         } = data
 
         const payloadToInsert: any = { ...cleanData, fecha: fechaDocumento(cleanData.fecha) }
+        // Los importes se recalculan siempre aquí a partir de las líneas: da igual
+        // lo que mande el navegador, la IA o Telegram.
+        aplicarTotales(payloadToInsert)
 
         // Evitar conversiones duplicadas: un presupuesto solo se convierte en un
         // albarán, y un albarán solo en una factura.
         if (source_document_id && source_document_type === 'presupuesto' && type === 'albaran') {
             const { data: yaExiste } = await supabase.from('albaranes').select('numero').eq('presupuesto_id', source_document_id).limit(1).maybeSingle()
             if (yaExiste) throw new Error(`Este presupuesto ya se convirtió en el albarán ${yaExiste.numero}.`)
+            payloadToInsert.presupuesto_id = source_document_id
+        }
+        if (source_document_id && source_document_type === 'presupuesto' && type === 'factura') {
+            const { data: yaExiste } = await supabase.from('facturas').select('numero').eq('presupuesto_id', source_document_id).limit(1).maybeSingle()
+            if (yaExiste) throw new Error(`Este presupuesto ya se facturó en la factura ${yaExiste.numero}.`)
             payloadToInsert.presupuesto_id = source_document_id
         }
         if (source_document_id && source_document_type === 'albaran' && type === 'factura') {
@@ -93,7 +115,7 @@ export async function crearDocumento(ctx: Contexto, data: any, type: Tipo) {
 
         if (type === 'factura') await completarCobroFactura(ctx, payloadToInsert)
 
-        const numero = await getNextSequenceNumber(type, supabase)
+        const numero = await getNextSequenceNumber(type, supabase, payloadToInsert.fecha)
 
         const payload = {
             ...payloadToInsert,

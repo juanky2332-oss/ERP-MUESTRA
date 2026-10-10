@@ -118,7 +118,8 @@ async function parteFirmadoPdf(cliente) {
         check('Expediente sin sesión: bloqueado', !r.ok || !/pdf/.test(r.headers.get('content-type') || ''), r.status)
 
         // ── Informes
-        for (const [q, esperado] of [['', 'Últimos 12 meses'], ['?preset=este_mes', 'Septiembre 2026'], ['?preset=mes&mes=2026-03', 'Marzo 2026'], ['?preset=trimestre', '3º trimestre 2026'], ['?preset=ano_anterior', 'Año 2025'], ['?preset=personalizado&desde=2026-09-01&hasta=2026-09-15', 'Del 01/09/2026 al 15/09/2026']]) {
+        const H = new Date(), MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+        for (const [q, esperado] of [['', 'Últimos 12 meses'], ['?preset=este_mes', `${MESES[H.getMonth()]} ${H.getFullYear()}`], ['?preset=mes&mes=2026-03', 'Marzo 2026'], ['?preset=trimestre', `${Math.floor(H.getMonth() / 3) + 1}º trimestre ${H.getFullYear()}`], ['?preset=ano_anterior', `Año ${H.getFullYear() - 1}`], ['?preset=personalizado&desde=2026-09-01&hasta=2026-09-15', 'Del 01/09/2026 al 15/09/2026']]) {
             await page.goto(APP + '/informes' + q, { waitUntil: 'networkidle2' })
             check(`Informes ${q || '(por defecto)'} → ${esperado}`, (await txt(page)).includes(esperado))
         }

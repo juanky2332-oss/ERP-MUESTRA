@@ -8,7 +8,6 @@ import { enviarCorreo, getEmpresa, registrarEnvio } from '@/lib/email/mailer'
 import { registrarCobro } from '@/lib/cobros/servidor'
 import { crearGasto } from '@/lib/gastos/servidor'
 import { etiquetaMetodo, hoyISO } from '@/lib/cobros/vencimientos'
-import { getNextSequenceNumber } from '@/lib/sequences'
 import { auditar } from '@/lib/auditoria'
 import { notificarCobroTelegram } from '@/lib/telegram/notificaciones'
 import { crearDocumento } from '@/lib/documentos/crear'
@@ -204,10 +203,9 @@ async function ejecutarSegunTipo(ctx: Contexto, a: Accion): Promise<ResultadoAcc
             assertPermiso(ctx, 'presupuestos')
             const { data: contacto } = await ctx.supabase.from('contactos').select('*').eq('id', p.clienteId).maybeSingle()
             if (!contacto) throw new Error('El cliente ya no existe.')
-            const numero = await getNextSequenceNumber('presupuesto', ctx.supabase)
-            const { data: ins, error } = await ctx.supabase.from('presupuestos').insert({
+            // Mismo alta que la web (numeración, totales recalculados, historial y auditoría)
+            const ins = await crearDocumento(ctx, {
                 empresa_id: ctx.empresaId,
-                numero,
                 fecha: hoyISO(),
                 fecha_validez: p.fecha_validez || null,
                 cliente_id: contacto.id,
@@ -220,19 +218,10 @@ async function ejecutarSegunTipo(ctx: Contexto, a: Accion): Promise<ResultadoAcc
                 cliente_ciudad: contacto.ciudad,
                 cliente_provincia: contacto.provincia,
                 lineas: p.lineas,
-                subtotal: p.base,
-                base_imponible: p.base,
                 iva_porcentaje: p.ivaPct,
-                iva_importe: p.ivaImporte,
-                total: p.total,
                 observaciones: p.observaciones || null,
-                statuses: ['pendiente'],
-                estado_vida: 'Pendiente',
                 estado: 'borrador',
-            }).select('id, numero, total').single()
-            if (error) throw new Error('No se pudo crear el presupuesto: ' + error.message)
-            await ctx.supabase.from('document_status').insert({ document_type: 'presupuesto', document_id: ins.id, status: 'pendiente', created_by: ctx.nombre })
-            await auditar(ctx, 'documento_creado', { tipo: 'presupuesto', id: ins.id, ref: ins.numero }, { total: ins.total, cliente: contacto.razon_social, origen: 'ia' })
+            }, 'presupuesto')
             return { ok: true, mensaje: `✅ Presupuesto ${ins.numero} creado en borrador para ${contacto.razon_social} por ${formatCurrency(Number(ins.total))}. No se ha enviado a nadie: revísalo en el ERP.`, datos: ins }
         }
         case 'documento': {
@@ -255,8 +244,8 @@ async function ejecutarSegunTipo(ctx: Contexto, a: Accion): Promise<ResultadoAcc
             const campos = ['cliente_id', 'cliente_razon_social', 'cliente_cif', 'cliente_direccion', 'cliente_telefono', 'cliente_email', 'cliente_codigo_postal', 'cliente_ciudad', 'cliente_provincia', 'pedido_referencia', 'lineas', 'subtotal', 'base_imponible', 'iva_porcentaje', 'iva_importe', 'total', 'observaciones']
             const datos: any = { empresa_id: ctx.empresaId, fecha: hoyISO() }
             for (const k of campos) if (o[k] !== undefined) datos[k] = o[k]
-            if (p.origenTipo === 'presupuesto' && p.destino === 'factura') datos.presupuesto_id = o.id
-            else { datos.source_document_id = o.id; datos.source_document_type = p.origenTipo }
+            // Mismo control de duplicados y estado «traspasado» en todas las conversiones
+            datos.source_document_id = o.id; datos.source_document_type = p.origenTipo
             const doc = await crearDocumento(ctx, datos, p.destino)
             if (p.origenTipo === 'presupuesto') await ctx.supabase.from('presupuestos').update({ aceptado: true, rechazado: false }).eq('id', o.id)
             return { ok: true, mensaje: `✅ ${NOMBRE[p.origenTipo as TipoDocumento]} ${o.numero} convertido en ${NOMBRE[p.destino as TipoDocumento].toLowerCase()} ${doc.numero} (${formatCurrency(Number(doc.total))}).${p.firmado ? ' La firma del albarán queda unida a la factura.' : ''}`, datos: { id: doc.id, numero: doc.numero, tipo: p.destino } }

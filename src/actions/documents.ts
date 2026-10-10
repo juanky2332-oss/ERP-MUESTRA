@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { getNextSequenceNumber } from '@/lib/sequences'
 import { getContexto, assertPermiso, mensajeError, type Contexto } from '@/lib/auth'
 import { auditar } from '@/lib/auditoria'
-import { crearDocumento } from '@/lib/documentos/crear'
+import { crearDocumento, aplicarTotales } from '@/lib/documentos/crear'
 import { calcularVencimiento, condicionDeCliente, describirCondicion, etiquetaMetodo, hoyISO, sumarDias } from '@/lib/cobros/vencimientos'
 
 type Tipo = 'presupuesto' | 'albaran' | 'factura'
@@ -56,6 +56,14 @@ export async function updateDocument(id: string, data: any, type: Tipo) {
         const { data: currentDoc } = await supabase.from(tableMap[type]).select('*').eq('id', id).single()
         if (!currentDoc) throw new Error('Documento no encontrado')
 
+        // Si cambian las líneas o el IVA, los importes se recalculan aquí (no se fían del navegador).
+        if (Array.isArray(cleanUpdateData.lineas) || 'iva_porcentaje' in cleanUpdateData) {
+            aplicarTotales(Object.assign(cleanUpdateData, {
+                lineas: Array.isArray(cleanUpdateData.lineas) ? cleanUpdateData.lineas : currentDoc.lineas,
+                iva_porcentaje: 'iva_porcentaje' in cleanUpdateData ? cleanUpdateData.iva_porcentaje : currentDoc.iva_porcentaje,
+            }))
+        }
+
         // En facturas, "pagada/pendiente" ya no se cambia a mano en statuses:
         // se registra un cobro (queda trazado y con importe). Si llega desde la
         // pantalla antigua, se ignora esa parte y se conserva el resto.
@@ -103,14 +111,49 @@ export async function deleteDocument(id: string, type: Tipo) {
         const ctx = await getContexto()
         permisoPara(ctx, type)
 
-        const { data: doc } = await ctx.supabase.from(tableMap[type]).select('numero, total, cliente_razon_social').eq('id', id).maybeSingle()
+        const { data: doc } = await ctx.supabase.from(tableMap[type]).select('*').eq('id', id).maybeSingle()
+        if (!doc) throw new Error('Documento no encontrado')
         if (type === 'factura') {
             const { count } = await ctx.supabase.from('cobros').select('id', { count: 'exact', head: true }).eq('factura_id', id).eq('estado', 'confirmado').neq('origen', 'importacion')
             if (count && count > 0) throw new Error('Esta factura tiene cobros registrados. Anula los cobros antes de eliminarla, o anula la factura.')
+            // Numeración correlativa sin huecos (art. 6 RD 1619/2012): solo se puede borrar
+            // la ÚLTIMA factura de la serie y si no se ha enviado. Si no, se anula.
+            if (doc.enviada || doc.enviado || doc.es_enviado || doc.enviado_email || (doc.statuses || []).includes('enviado')) {
+                throw new Error(`La factura ${doc.numero} ya se envió al cliente: no se puede borrar. Usa «Anular» (queda registrada con su motivo).`)
+            }
+            const m = /^(.*-)(\d+)-(\d{4})$/.exec(String(doc.numero))
+            if (m) {
+                const { data: serie } = await ctx.supabase.from('facturas').select('numero').ilike('numero', `${m[1]}%-${m[3]}`)
+                const mayor = (serie || []).some((f: any) => { const x = /-(\d+)-\d{4}$/.exec(f.numero); return x && parseInt(x[1], 10) > parseInt(m[2], 10) })
+                if (mayor) throw new Error(`La factura ${doc.numero} no es la última de la serie: borrarla dejaría un hueco en la numeración. Usa «Anular».`)
+            }
+        }
+
+        if (type === 'albaran' && doc.factura_id) {
+            const { data: f } = await ctx.supabase.from('facturas').select('numero').eq('id', doc.factura_id).maybeSingle()
+            if (f) throw new Error(`El albarán ${doc.numero} está facturado en ${f.numero}: no se puede borrar.`)
         }
 
         const { error } = await ctx.supabase.from(tableMap[type]).delete().eq('id', id)
         if (error) throw error
+
+        // El documento de origen vuelve a quedar pendiente (si no, desaparecía para siempre
+        // de "pendiente de facturar" y no se podía volver a convertir).
+        if (type === 'factura') {
+            const ids: string[] = Array.isArray(doc.albaran_ids) ? doc.albaran_ids : []
+            const { data: albs } = await ctx.supabase.from('albaranes').select('id, statuses').or([`factura_id.eq.${id}`, ...(ids.length ? [`id.in.(${ids.join(',')})`] : [])].join(','))
+            for (const a of albs || []) {
+                const st = (a.statuses || []).filter((s: string) => s !== 'traspasado')
+                await ctx.supabase.from('albaranes').update({ factura_id: null, statuses: st.includes('pendiente') ? st : [...st, 'pendiente'] }).eq('id', a.id)
+            }
+        }
+        if (type === 'albaran' && doc.presupuesto_id) {
+            const { data: p } = await ctx.supabase.from('presupuestos').select('statuses').eq('id', doc.presupuesto_id).maybeSingle()
+            if (p) {
+                const st = (p.statuses || []).filter((s: string) => s !== 'traspasado')
+                await ctx.supabase.from('presupuestos').update({ statuses: st.includes('pendiente') ? st : [...st, 'pendiente'] }).eq('id', doc.presupuesto_id)
+            }
+        }
 
         await auditar(ctx, 'documento_eliminado', { tipo: type, id, ref: doc?.numero }, { total: doc?.total, cliente: doc?.cliente_razon_social })
         revalidatePath(`/${tableMap[type]}`)

@@ -32,6 +32,8 @@ export interface ExpenseUpdatePayload {
     base_imponible: number
     iva_porcentaje: number
     iva_importe: number
+    retencion_porcentaje?: number | null
+    retencion_importe?: number | null
     total: number
 }
 
@@ -53,6 +55,8 @@ interface FormState {
     base_imponible: string
     iva_porcentaje: string
     iva_importe: string
+    retencion_porcentaje: string
+    retencion_importe: string
     total: string
     categoria: string
 }
@@ -75,6 +79,8 @@ function estadoInicial(gasto: Gasto): FormState {
         base_imponible: String(gasto.base_imponible ?? 0),
         iva_porcentaje: String(gasto.iva_porcentaje ?? 21),
         iva_importe: String(gasto.iva_importe ?? 0),
+        retencion_porcentaje: String(gasto.retencion_porcentaje ?? 0),
+        retencion_importe: String(gasto.retencion_importe ?? 0),
         total: String(gasto.total ?? 0),
         categoria: (gasto as any).categoria || '',
     }
@@ -153,15 +159,17 @@ export function ExpenseEditDialog({ gasto, proveedores = [], onSave, isSaving }:
         const base = num(form.base_imponible)
         const pct = num(form.iva_porcentaje)
         const iva = redondear(base * pct / 100)
+        const ret = redondear(base * num(form.retencion_porcentaje) / 100)
         setForm(prev => ({
             ...prev,
             iva_importe: String(iva),
-            total: String(redondear(base + iva)),
+            retencion_importe: String(ret),
+            total: String(redondear(base + iva - ret)),
         }))
     }
 
     const proveedorEsPropia = isOwnCompany(form.proveedor, form.proveedor_cif)
-    const descuadre = Math.abs(num(form.base_imponible) + num(form.iva_importe) - num(form.total)) > 0.02
+    const descuadre = Math.abs(num(form.base_imponible) + num(form.iva_importe) - num(form.retencion_importe) - num(form.total)) > 0.02
 
     const guardar = async () => {
         if (!form.proveedor.trim()) {
@@ -188,6 +196,8 @@ export function ExpenseEditDialog({ gasto, proveedores = [], onSave, isSaving }:
             base_imponible: num(form.base_imponible),
             iva_porcentaje: num(form.iva_porcentaje),
             iva_importe: num(form.iva_importe),
+            retencion_porcentaje: num(form.retencion_porcentaje),
+            retencion_importe: Math.abs(num(form.retencion_importe)),
             total: num(form.total),
             ...(form.categoria ? { categoria: form.categoria } : {}),
         } as any)
@@ -338,6 +348,18 @@ export function ExpenseEditDialog({ gasto, proveedores = [], onSave, isSaving }:
                                 <Label htmlFor="edit-total">Total</Label>
                                 <Input id="edit-total" type="number" step="0.01" className="font-bold" value={form.total} onChange={e => set('total', e.target.value)} />
                             </div>
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-2 items-end">
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="edit-ret-pct">% Retención IRPF</Label>
+                                <Input id="edit-ret-pct" type="number" step="1" value={form.retencion_porcentaje} onChange={e => set('retencion_porcentaje', e.target.value)} />
+                            </div>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="edit-ret">Imp. retención</Label>
+                                <Input id="edit-ret" type="number" step="0.01" value={form.retencion_importe} onChange={e => set('retencion_importe', e.target.value)} />
+                            </div>
+                            <p className="col-span-2 text-[11px] text-muted-foreground leading-tight">Alquiler de local: 19 % (modelo 115). Profesionales (asesor, abogado…): 15 % o 7 % (modelo 111). Total = base + IVA − retención.</p>
                         </div>
 
                         <div className="flex items-center justify-between gap-2">

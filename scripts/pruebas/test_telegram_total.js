@@ -87,7 +87,7 @@ async function albaranFirmadoPdf(numero, cliente) {
         out = await texto('/informe marzo')
         check('/informe marzo → marzo', /Marzo 2026/.test(textos(out)), textos(out).slice(0, 80))
         out = await boton('inf:trimestre_anterior')
-        check('Trimestre anterior', /2º trimestre 2026/.test(textos(out)))
+        { const h = new Date(); let q = Math.floor(h.getMonth() / 3), y = h.getFullYear(); if (q === 0) { q = 4; y-- } check('Trimestre anterior', new RegExp(`${q}º trimestre ${y}`).test(textos(out)), textos(out).slice(0, 80)) }
 
         // Albaranes: detalle y facturar
         out = await texto('/albaranes')

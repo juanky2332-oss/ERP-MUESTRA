@@ -26,6 +26,7 @@ export interface Presupuesto {
     estado: 'borrador' | 'enviado' | 'aceptado' | 'rechazado' | 'convertido' | 'gestionado'
     statuses: string[]
     observaciones?: string
+    descripcion?: string
     pdf_url?: string
     enviado: boolean
     fecha_envio?: string
@@ -44,10 +45,13 @@ export interface Albaran {
     cliente_cif?: string
     cliente_direccion?: string
     cliente_telefono?: string
+    cliente_email?: string
     pedido_referencia?: string
     persona_recibe?: string
     lineas: LineItem[]
     subtotal: number
+    base_imponible?: number
+    iva_porcentaje?: number
     iva_importe: number
     total: number
     estado: 'pendiente' | 'enviado' | 'entregado' | 'firmado' | 'facturado' | 'pasado_a_factura' | 'gestionado'
@@ -76,9 +80,11 @@ export interface Factura {
     pedido_referencia?: string
     lineas: LineItem[]
     subtotal: number
+    base_imponible?: number
     iva_porcentaje: number
     iva_importe: number
     total: number
+    descripcion?: string
     forma_pago?: 'transferencia' | 'efectivo' | '30_dias' | '60_dias' | '90_dias'
     iban?: string
     estado: 'pendiente' | 'enviada' | 'pagada' | 'vencida'

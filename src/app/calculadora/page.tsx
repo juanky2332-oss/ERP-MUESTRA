@@ -89,6 +89,22 @@ export default function CalculadoraPage() {
     }, [])
     useEffect(() => { cargar() }, [cargar])
 
+    // Pieza leída en «Presupuesto desde plano»: se carga una sola vez
+    useEffect(() => {
+        if (cargando) return
+        let d: any = null
+        try { d = JSON.parse(sessionStorage.getItem('calc_desde_plano') || 'null'); sessionStorage.removeItem('calc_desde_plano') } catch { }
+        if (!d?.entrada) return
+        const e = d.entrada
+        setNombre(d.nombre || 'Pieza'); if (e.materialId) setMaterialId(e.materialId); if (e.forma) setForma(e.forma)
+        setDims(Object.fromEntries(Object.entries(e.final || {}).map(([k, v]) => [k, String(v)])))
+        if (e.cantidad) setCantidad(String(e.cantidad))
+        setTaladros((e.taladros || []).map((t: any) => ({ ...t, id: uid() })))
+        if (e.tratamientos?.length) setTratamientos(e.tratamientos)
+        setPrecioManual(''); setDescManual(null)
+        toast.success(`Pieza «${d.nombre}» cargada desde el plano. Revisa operaciones y tiempos.`)
+    }, [cargando])
+
     const extra: Material[] = datos?.config?.materiales_extra || []
     const todos = useMemo(() => [...MATERIALES, ...extra], [extra])
     const material = materialPorId(materialId, extra) || MATERIALES[0]
@@ -361,7 +377,7 @@ export default function CalculadoraPage() {
                                 </div>
                                 <div className="grid grid-cols-3 gap-3">
                                     <CampoNum label="Otros costes del lote" value={otros} onChange={setOtros} sufijo="€" />
-                                    <CampoNum label="Margen" value={margen} onChange={setMargen} sufijo="%" />
+                                    <CampoNum label="Margen sobre coste" value={margen} onChange={setMargen} sufijo="%" />
                                     <CampoNum label="IVA" value={iva} onChange={setIva} sufijo="%" />
                                 </div>
                             </Bloque>
@@ -383,7 +399,7 @@ export default function CalculadoraPage() {
                                     {r.costeTratamientosLote > 0 && <Fila t="Tratamientos" v={r.costeTratamientosLote} />}
                                     {r.otrosLote > 0 && <Fila t="Otros" v={r.otrosLote} />}
                                     <Fila t="Coste del lote" v={r.costeLote} fuerte />
-                                    <Fila t={`Margen ${margen}%`} v={r.beneficioLote} />
+                                    <Fila t={`Margen ${margen}% sobre coste${r.precioLote > 0 ? ` (${(r.beneficioLote / r.precioLote * 100).toLocaleString('es-ES', { maximumFractionDigits: 1 })}% del precio de venta)` : ''}`} v={r.beneficioLote} />
                                 </div>
                                 <div className="rounded-xl bg-primary/10 p-4">
                                     <div className="flex justify-between items-end">
@@ -622,7 +638,7 @@ function PreciosYTarifas({ datos, precioDe, onCambio }: { datos: any; precioDe: 
                 </div>
                 <div className="rounded-2xl border bg-card p-4 space-y-2">
                     <p className="font-extrabold">Valores por defecto</p>
-                    {[['margen', 'Margen (%)'], ['kerf', 'Ancho de corte sierra (mm)'], ['sobremedidaSeccion', 'Creces en sección (mm)'], ['sobremedidaLargo', 'Creces en largo (mm)'], ['largoBarra', 'Compra por barra (mm, 0 = a medida)']].map(([k, t]) => (
+                    {[['margen', 'Margen sobre coste (%)'], ['kerf', 'Ancho de corte sierra (mm)'], ['sobremedidaSeccion', 'Creces en sección (mm)'], ['sobremedidaLargo', 'Creces en largo (mm)'], ['largoBarra', 'Compra por barra (mm, 0 = a medida)']].map(([k, t]) => (
                         <div key={k} className="flex items-center justify-between gap-2">
                             <span className="text-sm">{t}</span>
                             <Input inputMode="decimal" className="h-8 w-24 tabular-nums" value={param[k]} onChange={e => setParam({ ...param, [k]: e.target.value })} />

@@ -1,6 +1,7 @@
 'use server'
 
 import { getContexto, assertPermiso, mensajeError } from '@/lib/auth'
+import { tipoIva } from '@/lib/documentos/totales'
 import { leerDocumentoConIA } from '@/lib/ocr/leer'
 import { subirArchivo } from '@/lib/archivos-servidor'
 import { vincularProveedor } from '@/lib/gastos/servidor'
@@ -75,7 +76,9 @@ export async function processExpense(formData: FormData): Promise<ProcessExpense
             descripcion: ocrData.concepto || ocrData.descripcion || 'Gasto importado',
             base_imponible: Number(ocrData.base_imponible) || 0,
             iva_importe: Number(ocrData.iva_importe) || 0,
-            iva_porcentaje: Number(ocrData.iva_porcentaje) || 21,
+            iva_porcentaje: tipoIva(ocrData.iva_porcentaje),
+            retencion_porcentaje: Number(ocrData.retencion_porcentaje) || 0,
+            retencion_importe: Math.abs(Number(ocrData.retencion_importe) || 0),
             total: (Number(ocrData.total) || 0) === 0 && (Number(ocrData.base_imponible) || 0) > 0
                 ? (Number(ocrData.base_imponible) || 0) + (Number(ocrData.iva_importe) || 0)
                 : (Number(ocrData.total) || 0),

@@ -39,9 +39,9 @@ async function getStats(monthFilter: string | undefined) {
   ] = await Promise.all([
     supabase.from('presupuestos').select('total, created_at, numero, cliente_razon_social, aceptado, rechazado, statuses').order('created_at', { ascending: false }),
     supabase.from('albaranes').select('total, created_at').order('created_at', { ascending: false }),
-    supabase.from('facturas').select('total, created_at, estado, pagada, statuses, fecha_vencimiento, numero, cliente_razon_social, fecha').order('created_at', { ascending: false }),
+    supabase.from('facturas').select('total, base_imponible, iva_importe, anulada, created_at, estado, pagada, statuses, fecha_vencimiento, numero, cliente_razon_social, fecha').or('anulada.is.null,anulada.eq.false').order('created_at', { ascending: false }),
     supabase.from('gastos').select('total, base_imponible, iva_importe, fecha, created_at').order('created_at', { ascending: false }),
-    supabase.from('albaranes').select('total, created_at').not('documento_firmado_url', 'is', null).order('created_at', { ascending: false }),
+    supabase.from('albaranes').select('total, created_at').not('firmado_at', 'is', null).order('created_at', { ascending: false }),
     supabase.from('notificaciones_historial').select('*').order('created_at', { ascending: false }).limit(5)
   ])
 
@@ -61,11 +61,11 @@ async function getStats(monthFilter: string | undefined) {
     return date >= startDate && date <= endDate
   }
 
-  const filteredPresupuestos = presupuestos?.filter(d => filterByDate(d)) || []
-  const filteredAlbaranes = albaranes?.filter(d => filterByDate(d)) || []
-  const filteredFacturas = facturas?.filter(d => filterByDate(d)) || []
-  const filteredGastos = gastos?.filter(d => filterByDate(d, 'fecha')) || []
-  const filteredAlbaranesFirmados = albaranesFirmados?.filter(d => filterByDate(d)) || []
+  const filteredPresupuestos = presupuestos?.filter((d: any) => filterByDate(d)) || []
+  const filteredAlbaranes = albaranes?.filter((d: any) => filterByDate(d)) || []
+  const filteredFacturas = facturas?.filter((d: any) => filterByDate(d, 'fecha')) || []
+  const filteredGastos = gastos?.filter((d: any) => filterByDate(d, 'fecha')) || []
+  const filteredAlbaranesFirmados = albaranesFirmados?.filter((d: any) => filterByDate(d)) || []
 
   const totalPresupuestos = filteredPresupuestos.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0)
   const totalAlbaranes = filteredAlbaranes.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0)
@@ -75,7 +75,9 @@ async function getStats(monthFilter: string | undefined) {
     return acc + amount
   }, 0)
   const totalAlbaranesFirmados = filteredAlbaranesFirmados.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0)
-  const netProfit = totalFacturado - totalGastos
+  // Resultado como en Informes: bases sin IVA (el IVA no es beneficio: se ingresa a Hacienda)
+  const baseDe = (d: any) => d.base_imponible != null ? Number(d.base_imponible) || 0 : (Number(d.total) || 0) - (Number(d.iva_importe) || 0)
+  const netProfit = filteredFacturas.reduce((a: number, f: any) => a + baseDe(f), 0) - filteredGastos.reduce((a: number, g: any) => a + baseDe(g), 0)
 
   // ---- Cobros: todo sale del motor de cobros (pagos parciales incluidos) ----
   const totalPendienteCobro = rc.pendienteTotal
@@ -326,7 +328,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           </div>
 
           <div className="bg-muted px-6 py-4 rounded-2xl border border-border text-right">
-            <span className="text-[10px] font-bold uppercase tracking-widest block mb-1 opacity-60">Beneficio Neto</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest block mb-1 opacity-60">Resultado (sin IVA)</span>
             <MoneyDisplay value={stats.financials.profit} tone="auto" size="lg" />
           </div>
         </div>

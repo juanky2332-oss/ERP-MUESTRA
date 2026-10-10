@@ -44,6 +44,8 @@ export interface DatosGasto {
     base_imponible?: number | null
     iva_porcentaje?: number | null
     iva_importe?: number | null
+    retencion_porcentaje?: number | null
+    retencion_importe?: number | null
     total?: number | null
     archivo_url?: string | null
     cliente_id?: string | null
@@ -58,13 +60,25 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 /** Crea un gasto (validando importes) con número interno G-XX-AAAA y auditoría. */
 export async function crearGasto(ctx: Contexto, d: DatosGasto) {
     assertPermiso(ctx, 'gastos')
-    const base = r2(Number(d.base_imponible) || 0)
+    let base = r2(Number(d.base_imponible) || 0)
     const ivaPct = d.iva_porcentaje === null || d.iva_porcentaje === undefined ? null : Number(d.iva_porcentaje)
     let ivaImp = d.iva_importe === null || d.iva_importe === undefined ? null : r2(Number(d.iva_importe))
     let total = r2(Number(d.total) || 0)
 
+    // Solo el total (IVA incluido): se desglosa base y cuota. Si no, el gasto
+    // quedaba con base 0 e IVA 0 y el IVA soportado no llegaba a Fiscal ni a Informes.
+    if (!base && total > 0) {
+        if (ivaImp !== null && ivaImp > 0) base = r2(total - ivaImp)
+        else if (ivaPct !== null) { base = r2(total / (1 + ivaPct / 100)); ivaImp = r2(total - base) }
+    }
+
+    // Retención de IRPF (alquiler de la nave → modelo 115; profesionales → 111)
+    const retPct = Math.max(0, Number(d.retencion_porcentaje) || 0)
+    let retImp = Math.abs(Number(d.retencion_importe) || 0)
+    if (!retImp && retPct > 0 && base > 0) retImp = r2(base * retPct / 100)
+
     if (ivaImp === null && ivaPct !== null && base > 0) ivaImp = r2(base * ivaPct / 100)
-    if (!total && base > 0) total = r2(base + (ivaImp || 0))
+    if (!total && base > 0) total = r2(base + (ivaImp || 0) - retImp)
     if (!(total > 0)) throw new Error('El gasto necesita un importe total mayor que 0.')
 
     const proveedorId = d.proveedor_id || await vincularProveedor(ctx, d.proveedor, d.proveedor_cif)
@@ -83,6 +97,8 @@ export async function crearGasto(ctx: Contexto, d: DatosGasto) {
         base_imponible: base,
         iva_porcentaje: ivaPct ?? 21,
         iva_importe: ivaImp ?? 0,
+        retencion_porcentaje: retPct || (retImp && base ? r2(retImp / base * 100) : 0),
+        retencion_importe: retImp,
         total,
         importe: total,
         factura_url: d.archivo_url || null,

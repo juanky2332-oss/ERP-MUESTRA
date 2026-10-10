@@ -104,5 +104,7 @@ const clic = (page, texto) => page.evaluate(t => { const b = [...document.queryS
         await admin.from('empresas').update({ logo_documentos_url: empAntes.logo_documentos_url, logo_app_url: empAntes.logo_app_url }).eq('id', perfil.empresa_id)
         await browser.close()
         console.log(`\n${ok} OK · ${fail} fallos`)
+        // Algún temporizador del cliente de Supabase dejaba el proceso vivo al terminar
+        process.exit(fail ? 1 : 0)
     }
 })()

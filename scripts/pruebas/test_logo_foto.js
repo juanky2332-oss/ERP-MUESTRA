@@ -52,9 +52,11 @@ const esperar = ms => new Promise(r => setTimeout(r, ms))
                 const v = (await admin.from('empresas').select(col).eq('id', perfil.empresa_id).single()).data[col]
                 if (v && v !== empAntes[col]) guardado = v
             }
-            const cerrado = await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 }).then(() => true, () => false)
+            // Solo el diálogo del logo (el aviso de facturas vencidas también es un diálogo)
+            const cerrado = await page.waitForFunction(() => ![...document.querySelectorAll('[role="dialog"]')].some(d => /Confirmar nuevo logo/.test(d.innerText)), { timeout: 5000 }).then(() => true, () => false)
             check(`Logo de ${tipo} desde foto grande: guardado`, !!guardado, guardado ? `${((Date.now() - t0) / 1000).toFixed(1)} s` : 'no llegó a guardarse')
-            check(`Logo de ${tipo}: el diálogo se cierra (no se queda cargando)`, cerrado)
+            const abiertos = cerrado ? '' : await page.evaluate(() => [...document.querySelectorAll('[role="dialog"]')].map(d => (d.getAttribute('aria-label') || d.innerText).slice(0, 80)).join(' | '))
+            check(`Logo de ${tipo}: el diálogo se cierra (no se queda cargando)`, cerrado, abiertos)
             if (guardado) {
                 const r = await fetch(guardado); const kb = Number(r.headers.get('content-length') || 0) / 1024
                 check(`Logo de ${tipo}: archivo ligero`, r.ok && kb < 800, `${kb.toFixed(0)} KB · ${r.headers.get('content-type')}`)

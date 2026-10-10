@@ -16,6 +16,8 @@ export interface Gasto {
     base_imponible: number
     iva_porcentaje?: number
     iva_importe: number
+    retencion_porcentaje?: number | null
+    retencion_importe?: number | null
     total: number
     factura_url?: string
     created_at: string

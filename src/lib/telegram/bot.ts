@@ -646,7 +646,8 @@ async function recibirArchivo(s: Sesion, message: any) {
         proveedor: prov.proveedor, proveedor_cif: prov.proveedor_cif || null, fecha: d.fecha || hoyISO(),
         concepto: d.concepto || d.descripcion || null, numero: d.numero || null,
         base_imponible: num(d.base_imponible), iva_porcentaje: num(d.iva_porcentaje), iva_importe: num(d.iva_importe),
-        total: num(d.total) ?? ((num(d.base_imponible) || 0) + (num(d.iva_importe) || 0)),
+        retencion_porcentaje: num(d.retencion_porcentaje), retencion_importe: num(d.retencion_importe),
+        total: num(d.total) ?? ((num(d.base_imponible) || 0) + (num(d.iva_importe) || 0) - Math.abs(num(d.retencion_importe) || 0)),
         categoria: null, archivo_url: sub.url, ocr_data: { ...d, _proveedor_resuelto: prov },
     }
     if (!(Number(payload.total) > 0)) {

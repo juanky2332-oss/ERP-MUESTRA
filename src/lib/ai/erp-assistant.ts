@@ -1,5 +1,6 @@
 import 'server-only'
 import { OpenAI } from "openai"
+import { rankingCatalogo } from '@/lib/ai/catalogo-busqueda'
 import type { Contexto } from "@/lib/auth"
 import { tienePermiso } from "@/lib/permisos"
 import { ejecutarLectura, formatEuro } from "@/lib/ai/herramientas-lectura"
@@ -230,6 +231,7 @@ const accionTools = [
                 type: "object", properties: {
                     proveedor: { type: "string" }, fecha: { type: "string" }, concepto: { type: "string" },
                     base_imponible: { type: "number" }, iva_porcentaje: { type: "number" }, iva_importe: { type: "number" }, total: { type: "number" },
+                    retencion_porcentaje: { type: "number", description: "Solo si el usuario dice que lleva retención de IRPF (alquiler 19, profesional 15 o 7)." },
                     categoria: { type: "string", enum: [...CATEGORIAS_GASTO] }
                 }, required: ["total"]
             }
@@ -429,10 +431,12 @@ async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimo
             }
         }
         case 'buscar_catalogo': {
-            const t = String(args.texto || '').trim()
-            const { data } = await ctx.supabase.from('catalogo').select('nombre, referencia, tipo, descripcion, unidad, precio_venta, iva_porcentaje, categoria').eq('activo', true)
-                .or(`nombre.ilike.%${t}%,referencia.ilike.%${t}%,descripcion.ilike.%${t}%,categoria.ilike.%${t}%`).limit(15)
-            return { resultados: data || [], nota: (data || []).length ? undefined : 'No hay productos que coincidan en el catálogo. No inventes precios: pregunta al usuario.' }
+            // Búsqueda por palabras (sin tildes, plurales ni mayúsculas, con prefijos):
+            // «bridas inox DN50» encuentra «Brida inoxidable 316 DN50». Antes se
+            // buscaba la frase entera y casi nunca coincidía.
+            const { data: todos } = await ctx.supabase.from('catalogo').select('nombre, referencia, tipo, descripcion, unidad, precio_venta, iva_porcentaje, categoria').eq('activo', true).limit(2000)
+            const resultados = rankingCatalogo(todos || [], String(args.texto || '')).slice(0, 15)
+            return { resultados, nota: resultados.length ? 'Usa solo estos precios; si ninguno es exactamente lo pedido, dilo y pregunta.' : 'No hay productos que coincidan en el catálogo. No inventes precios: pregunta al usuario.' }
         }
         case 'get_albaranes_firmados': {
             const est = await estadoFirmas(ctx)
@@ -472,7 +476,7 @@ async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimo
                 },
                 nota: 'Importes calculados por el sistema; no los recalcules. El informe completo con gráficos está en el menú Informes.',
             }
-            if (ap === 'ventas' || ap === 'todo') { out.ventas_por_cliente = a.ventasPorCliente.slice(0, 15).map(x => ({ cliente: x.clave, facturas: x.num, importe: e(x.importe) })); out.mas_vendido = a.porConcepto.slice(0, 10).map(x => ({ concepto: x.clave, importe: e(x.importe) })) }
+            if (ap === 'ventas' || ap === 'todo') { out.ventas_por_cliente = a.ventasPorCliente.slice(0, 15).map(x => ({ cliente: x.clave, facturas: x.num, importe: e(x.importe) })); out.mas_vendido = a.porConcepto.slice(0, 10).map(x => ({ concepto: x.clave, cantidad_total: x.cantidad, lineas: x.num, importe: e(x.importe) })) }
             if (ap === 'cobros' || ap === 'todo') { out.antiguedad_deuda = a.antiguedad.map(t => ({ tramo: t.etiqueta, importe: e(t.importe), facturas: t.num })); out.deudores = a.deudores.slice(0, 10).map(x => ({ cliente: x.clave, pendiente: e(x.importe) })) }
             if (ap === 'gastos' || ap === 'todo') { out.gastos_por_categoria = a.gastosPorCategoria.map(x => ({ categoria: x.clave, importe: e(x.importe) })); out.gastos_por_proveedor = a.gastosPorProveedor.slice(0, 10).map(x => ({ proveedor: x.clave, importe: e(x.importe) })) }
             if (ap === 'iva' || ap === 'todo') out.iva_trimestres = a.ivaTrimestres.map(t => ({ trimestre: t.trimestre, iva_repercutido: e(t.repercutido), iva_soportado: e(t.soportado), resultado: e(t.resultado) }))
@@ -630,6 +634,7 @@ async function ejecutarAccionTool(ctx: Contexto, name: string, args: any, ultimo
             const payload = {
                 proveedor: args.proveedor || null, fecha: args.fecha || hoyISO(), concepto: args.concepto || null,
                 base_imponible: args.base_imponible ?? null, iva_porcentaje: args.iva_porcentaje ?? null, iva_importe: args.iva_importe ?? null,
+                retencion_porcentaje: args.retencion_porcentaje ?? null,
                 total: Number(args.total), categoria: args.categoria || null,
             }
             if (!(payload.total > 0)) return { error: 'Falta el importe total del gasto. Pregúntalo.' }

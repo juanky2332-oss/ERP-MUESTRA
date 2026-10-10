@@ -1,6 +1,6 @@
 'use client'
 
-import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Eye, FileText, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
@@ -48,10 +48,10 @@ export function DocumentPreviewModal({ url: initialUrl, document, type, onGenera
             </DialogTrigger>
             <DialogContent className="max-w-5xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-white">
                 <div className="flex justify-between items-center p-3 border-b bg-gray-50">
-                    <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                    <DialogTitle className="font-bold text-base text-gray-700 flex items-center gap-2">
                         <FileText className="h-4 w-4 text-[#1E88E5]" />
                         {title || 'Visualización de Documento'}
-                    </h3>
+                    </DialogTitle>
                     <div className="flex gap-2">
                         {url && (
                             <Button asChild variant="outline" size="sm" className="h-8 gap-1">

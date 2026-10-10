@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { supabase } from '@/lib/supabase'
 
-export async function getNextSequenceNumber(type: 'presupuesto' | 'albaran' | 'factura' | 'gasto' | 'parte', customClient?: any): Promise<string> {
+export async function getNextSequenceNumber(type: 'presupuesto' | 'albaran' | 'factura' | 'gasto' | 'parte', customClient?: any, fechaDoc?: string): Promise<string> {
     const tableMap = {
         'presupuesto': 'presupuestos',
         'albaran': 'albaranes',
@@ -18,7 +18,11 @@ export async function getNextSequenceNumber(type: 'presupuesto' | 'albaran' | 'f
     }
     const table = tableMap[type]
     const prefix = prefixMap[type]
-    const year = new Date().getFullYear()
+    // La serie va por el año de la FECHA del documento (en hora de España), no
+    // por el reloj del servidor (UTC): el 31/12 a las 23:30 sigue siendo ese año.
+    const year = /^\d{4}-\d{2}-\d{2}/.test(fechaDoc || '')
+        ? Number(fechaDoc!.slice(0, 4))
+        : Number(new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Madrid' }).slice(0, 4))
     const client = customClient || supabase
 
     // IMPORTANTE: sin .order() ni .limit() — el campo "numero" es texto,

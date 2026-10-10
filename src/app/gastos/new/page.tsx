@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { tipoIva } from '@/lib/documentos/totales'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -25,6 +26,8 @@ const gastoSchema = z.object({
     base_imponible: z.coerce.number().min(0),
     iva_porcentaje: z.coerce.number().min(0).max(100),
     iva_importe: z.coerce.number().min(0),
+    retencion_porcentaje: z.coerce.number().min(0).max(100).default(0),
+    retencion_importe: z.coerce.number().min(0).default(0),
     total: z.coerce.number().min(0),
     archivo_url: z.string().optional(),
     ocr_data: z.any().optional()
@@ -56,6 +59,8 @@ export default function NewGastoPage() {
             base_imponible: 0,
             iva_porcentaje: 21,
             iva_importe: 0,
+            retencion_porcentaje: 0,
+            retencion_importe: 0,
             total: 0
         }
     })
@@ -109,9 +114,11 @@ export default function NewGastoPage() {
                 form.setValue('concepto', d.concepto || '')
                 form.setValue('fecha', d.fecha || new Date().toISOString().split('T')[0])
                 form.setValue('base_imponible', d.base_imponible || 0)
-                form.setValue('iva_porcentaje', d.iva_porcentaje || 21)
+                form.setValue('iva_porcentaje', tipoIva(d.iva_porcentaje))
                 form.setValue('iva_importe', d.iva_importe || 0)
                 form.setValue('total', d.total || 0)
+                form.setValue('retencion_porcentaje', Number(d.retencion_porcentaje) || 0)
+                form.setValue('retencion_importe', Math.abs(Number(d.retencion_importe) || 0))
                 form.setValue('ocr_data', d)
                 toast.success('Datos extraídos correctamente')
             } else {
@@ -154,6 +161,8 @@ export default function NewGastoPage() {
                 base_imponible: values.base_imponible,
                 iva_porcentaje: values.iva_porcentaje,
                 iva_importe: values.iva_importe,
+                retencion_porcentaje: values.retencion_porcentaje,
+                retencion_importe: values.retencion_importe,
                 total: values.total,
                 ocr_data: values.ocr_data,
                 archivo_url: fileUrl || null,
@@ -348,6 +357,50 @@ export default function NewGastoPage() {
                                             )}
                                         />
                                     </div>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <FormField
+                                            control={form.control}
+                                            name="retencion_porcentaje"
+                                            render={({ field }) => (
+                                                <FormItem>
+                                                    <FormLabel>% Retención IRPF</FormLabel>
+                                                    <FormControl><Input type="number" step="1" {...field} value={field.value as any} /></FormControl>
+                                                </FormItem>
+                                            )}
+                                        />
+                                        <FormField
+                                            control={form.control}
+                                            name="retencion_importe"
+                                            render={({ field }) => (
+                                                <FormItem>
+                                                    <FormLabel>Imp. retención</FormLabel>
+                                                    <FormControl><Input type="number" step="0.01" {...field} value={field.value as any} /></FormControl>
+                                                </FormItem>
+                                            )}
+                                        />
+                                        <p className="text-[11px] text-muted-foreground self-end leading-tight">Alquiler del local 19 % (115) · profesionales 15 % o 7 % (111)</p>
+                                    </div>
+                                    {(() => {
+                                        const tot = Number(form.watch('total')) || 0, b = Number(form.watch('base_imponible')) || 0, iv = Number(form.watch('iva_importe')) || 0, ret = Number(form.watch('retencion_importe')) || 0
+                                        const descuadre = tot > 0 && Math.abs(b + iv - ret - tot) > 0.01
+                                        return (
+                                            <div className="flex items-center justify-between gap-2 text-xs">
+                                                <span className={descuadre ? 'text-amber-600' : 'text-muted-foreground'}>
+                                                    {descuadre ? `Base + IVA${ret ? ' − retención' : ''} = ${(b + iv - ret).toFixed(2)} € no coincide con el total` : `Base + IVA${ret ? ' − retención' : ''} cuadra con el total`}
+                                                </span>
+                                                {tot > 0 && (
+                                                    <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => {
+                                                        const pct = Number(form.getValues('iva_porcentaje')) || 0
+                                                        const rp = Number(form.getValues('retencion_porcentaje')) || 0
+                                                        const base = Math.round(tot / (1 + (pct - rp) / 100) * 100) / 100
+                                                        form.setValue('base_imponible', base)
+                                                        form.setValue('iva_importe', Math.round(base * pct) / 100)
+                                                        form.setValue('retencion_importe', Math.round(base * rp) / 100)
+                                                    }}>Desglosar desde el total</Button>
+                                                )}
+                                            </div>
+                                        )
+                                    })()}
 
                                     <Button type="submit" className="w-full bg-[#1E88E5] hover:bg-[#1565C0] mt-4" disabled={isSaving}>
                                         {isSaving ? (

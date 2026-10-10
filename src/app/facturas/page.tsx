@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { tipoIva, r2 as redondear2 } from '@/lib/documentos/totales'
 import { FileEdit, ChevronsUpDown } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
@@ -136,7 +137,7 @@ export default function FacturasPage() {
 
         updateInvoice.mutate({
             id: doc.id,
-            statuses: Array.from(currentStatuses)
+            statuses: Array.from(currentStatuses) as string[]
         })
     }
 
@@ -557,8 +558,8 @@ export default function FacturasPage() {
                                 <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={() => {
                                     const lineas = editingDoc.lineas || []
                                     const base = lineas.reduce((acc: number, l: any) => acc + (Number(l.cantidad) * Number(l.precio_unitario)), 0)
-                                    const ivaPct = Number(editingDoc.iva_porcentaje) || 21
-                                    const ivaImporte = base * (ivaPct / 100)
+                                    const ivaPct = tipoIva(editingDoc.iva_porcentaje)
+                                    const ivaImporte = redondear2(base * (ivaPct / 100))
                                     const total = base + ivaImporte
                                     updateInvoice.mutate({
                                         id: editingDoc.id,

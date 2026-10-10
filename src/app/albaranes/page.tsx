@@ -1,6 +1,7 @@
 'use client'
 
 import { Plus, Search, FileText, Eye, Trash2, Loader2, Edit, Check, Mail, ArrowRight, ChevronsUpDown } from 'lucide-react'
+import { tipoIva, r2 as redondear2 } from '@/lib/documentos/totales'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { format } from 'date-fns'
@@ -116,7 +117,7 @@ export default function AlbaranesPage() {
 
         updateDeliveryNote.mutate({
             id: doc.id,
-            statuses: Array.from(currentStatuses)
+            statuses: Array.from(currentStatuses) as string[]
         })
     }
 
@@ -492,8 +493,8 @@ export default function AlbaranesPage() {
                                 <Button className="bg-purple-600 hover:bg-purple-700 text-white" onClick={() => {
                                     const lineas = editingDoc.lineas || []
                                     const base = lineas.reduce((acc: number, l: any) => acc + (Number(l.cantidad) * Number(l.precio_unitario)), 0)
-                                    const ivaPct = Number(editingDoc.iva_porcentaje) || 21
-                                    const ivaImporte = base * (ivaPct / 100)
+                                    const ivaPct = tipoIva(editingDoc.iva_porcentaje)
+                                    const ivaImporte = redondear2(base * (ivaPct / 100))
                                     const total = base + ivaImporte
                                     updateDeliveryNote.mutate({
                                         id: editingDoc.id,

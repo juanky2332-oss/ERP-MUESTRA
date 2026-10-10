@@ -188,7 +188,7 @@ function Ventas({ a, archivo }: { a: Informe; archivo: (s: string) => string }) 
             <Caja titulo={`Ventas por cliente (${a.ventasPorCliente.length})`} accion={<ExportarCSV nombre={archivo('ventas_por_cliente')} columnas={['Cliente', 'Facturas', 'Importe sin IVA', '% del total']} filas={a.ventasPorCliente.map(c => [c.clave, c.num, c.importe, Math.round((c.importe / total) * 1000) / 10])} />}>
                 <Tabla cols={['Cliente', 'Facturas', 'Importe', '%']} filas={a.ventasPorCliente.map(c => [c.clave, c.num, formatCurrency(c.importe), `${Math.round((c.importe / total) * 100)}%`])} />
             </Caja>
-            <Caja titulo="Lo más vendido (líneas de factura)" accion={<ExportarCSV nombre={archivo('ventas_por_concepto')} columnas={['Concepto', 'Líneas', 'Importe sin IVA']} filas={a.porConcepto.map(c => [c.clave, c.num, c.importe])} />}>
+            <Caja titulo="Lo más vendido (líneas de factura)" accion={<ExportarCSV nombre={archivo('ventas_por_concepto')} columnas={['Concepto', 'Líneas', 'Cantidad', 'Importe sin IVA']} filas={a.porConcepto.map(c => [c.clave, c.num, c.cantidad, c.importe])} />}>
                 <Barras datos={a.porConcepto} />
             </Caja>
         </div>

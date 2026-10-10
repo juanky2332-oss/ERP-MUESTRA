@@ -1,4 +1,5 @@
   import jsPDF from 'jspdf'
+import { calcularTotales, tipoIva } from '@/lib/documentos/totales'
   import autoTable from 'jspdf-autotable'
   import { format } from 'date-fns'
   import { es } from 'date-fns/locale'
@@ -264,10 +265,12 @@
       }
 
       // Totals Box
-      const baseImponible = Number(doc.base_imponible) || doc.lineas.reduce((acc: number, l: any) => acc + (Number(l.cantidad) * Number(l.precio_unitario)), 0)
-      const ivaPct = Number(doc.iva_porcentaje) || 21
-      const ivaImp = Number(doc.iva_importe) || (baseImponible * (ivaPct / 100))
-      const totalDoc = Number(doc.total) || (baseImponible + ivaImp)
+      // Siempre desde las líneas, con la misma fórmula que el servidor (IVA 0 % incluido)
+      const tot = calcularTotales(doc.lineas || [], doc.iva_porcentaje)
+      const baseImponible = tot.base
+      const ivaPct = tot.ivaPct
+      const ivaImp = tot.ivaImporte
+      const totalDoc = tot.total
 
       const footerX = 140
       const footerWidth = 55
@@ -432,7 +435,7 @@
       let footerY = startY + 42
 
       const baseImponible = Number(gasto.base_imponible) || 0
-      const ivaPct = Number(gasto.iva_porcentaje) || 21
+      const ivaPct = tipoIva(gasto.iva_porcentaje)
       const ivaImp = Number(gasto.iva_importe) || 0
       const totalDoc = Number(gasto.total) || 0
 

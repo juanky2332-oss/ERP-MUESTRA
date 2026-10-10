@@ -55,7 +55,8 @@ export function FinancialChart({ invoices, expenses }: FinancialChartProps) {
             const rangeEnd = endOfMonth(month)
 
             const monthlyInvoices = sortedInvoices.filter(i => {
-                const d = new Date(i.created_at)
+                // Fecha de la factura (no la de alta en el sistema)
+                const d = new Date(i.fecha || i.created_at)
                 return d >= rangeStart && d <= rangeEnd
             })
 
