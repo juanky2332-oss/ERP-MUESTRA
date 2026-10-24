@@ -224,7 +224,7 @@ export function ChatWidget() {
     const BrandingFooter = () => (
         <div className="w-full text-center pointer-events-auto">
             <p className="text-[10px] text-gray-400 font-medium inline-block shadow-sm">
-                powered by <a href="https://www.flownexion.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#1E88E5] transition-colors font-semibold">Flownexion</a>
+                powered by <a href="https://transformaconia.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#1E88E5] transition-colors font-semibold">Transforma con IA</a>
             </p>
         </div>
     )
