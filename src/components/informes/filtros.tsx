@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Download, Printer } from 'lucide-react'
+import { Download, FileDown, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -25,6 +26,25 @@ export function FiltrosInformes({ clientes, hoy }: { clientes: { id: string; nom
     const preset = sp.get('preset') || 'ultimos_12'
     const [desde, setDesde] = useState(sp.get('desde') || '')
     const [hasta, setHasta] = useState(sp.get('hasta') || '')
+    const [generando, setGenerando] = useState(false)
+
+    // PDF generado en el servidor (gráfica y tablas maquetadas para A4), no la impresión de la pantalla
+    const descargarPdf = async () => {
+        setGenerando(true)
+        try {
+            const q = new URLSearchParams(sp.toString()); q.delete('vista')
+            const res = await fetch(`/api/informes/pdf?${q.toString()}`)
+            if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'No se pudo generar el PDF')
+            const nombre = decodeURIComponent(res.headers.get('content-disposition')?.match(/filename\*=UTF-8''([^;]+)/)?.[1] || 'Informe.pdf')
+            const url = URL.createObjectURL(await res.blob())
+            const a = document.createElement('a'); a.href = url; a.download = nombre; a.click()
+            setTimeout(() => URL.revokeObjectURL(url), 2000)
+        } catch (e: any) {
+            toast.error(e?.message || 'No se pudo generar el PDF')
+        } finally {
+            setGenerando(false)
+        }
+    }
 
     const ir = (cambios: Record<string, string | null>) => {
         const q = new URLSearchParams(sp.toString())
@@ -60,7 +80,7 @@ export function FiltrosInformes({ clientes, hoy }: { clientes: { id: string; nom
                     <option value="">Todos los clientes</option>
                     {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                 </select>
-                <Button size="sm" variant="ghost" className="ml-auto" onClick={() => window.print()}><Printer className="h-4 w-4 mr-1" /> Imprimir / PDF</Button>
+                <Button size="sm" className="ml-auto" onClick={descargarPdf} disabled={generando}>{generando ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileDown className="h-4 w-4 mr-1" />} {generando ? 'Generando…' : 'Descargar PDF'}</Button>
             </div>
         </div>
     )
