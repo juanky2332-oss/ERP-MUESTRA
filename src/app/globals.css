@@ -180,3 +180,39 @@
 @media print {
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* ── Presupuesto desde plano (IndunexIA Presupuestos dentro del ERP) ── */
+@theme inline {
+  --color-txt: var(--foreground);
+  --color-txt-2: var(--muted-foreground);
+  --color-txt-3: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+  --color-card-2: var(--muted);
+  --color-borde: var(--border);
+  --color-acento: #7c3aed;
+  --color-acento-suave: color-mix(in oklab, #7c3aed 10%, transparent);
+  --color-bien: #059669;
+  --color-bien-suave: color-mix(in oklab, #059669 10%, transparent);
+  --color-aviso: #b45309;
+  --color-aviso-suave: color-mix(in oklab, #f59e0b 14%, transparent);
+  --color-mal: #dc2626;
+  --color-mal-suave: color-mix(in oklab, #dc2626 10%, transparent);
+  --color-noche: #0b0614;
+}
+.tabular { font-variant-numeric: tabular-nums; }
+.font-display { letter-spacing: -0.01em; }
+.degradado { background-image: linear-gradient(120deg, #e05cff 0%, #a11cf0 45%, #5b3cff 100%); }
+.texto-degradado { background-image: linear-gradient(120deg, #f0a6ff 0%, #c56bff 40%, #8f7bff 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+@layer components {
+  .pia-input { width: 100%; border-radius: .6rem; border: 1px solid var(--border); background: var(--card); padding: .5rem .75rem; font-size: .875rem; color: var(--foreground); outline: none; transition: border-color .15s, box-shadow .15s; }
+  .pia-input:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,.15); }
+  .input-celda { width: 100%; border-radius: .4rem; border: 1px solid transparent; background: transparent; padding: .3rem .45rem; font-size: .85rem; color: var(--foreground); outline: none; }
+  .input-celda:hover { border-color: var(--border); background: var(--card); }
+  .input-celda:focus { border-color: #7c3aed; background: var(--card); box-shadow: 0 0 0 3px rgba(124,58,237,.12); }
+}
+@keyframes pia-escanear { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+.pia-escaner { animation: pia-escanear 2.2s cubic-bezier(.45,0,.55,1) infinite alternate; }
+@keyframes pia-aparecer { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.aparecer { animation: pia-aparecer .5s ease both; }
+@media (prefers-reduced-motion: reduce) { .pia-escaner, .aparecer { animation: none; } }
+@media print { .no-imprimir { display: none !important; } }
+

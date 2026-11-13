@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" font-family="Arial, Helvetica, sans-serif">
+  <rect width="1600" height="1100" fill="#fff"/>
+  <rect x="20" y="20" width="1560" height="1060" fill="none" stroke="#000" stroke-width="3"/>
+  <defs><marker id="f" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#000"/></marker></defs>
+  <text x="60" y="80" font-size="30" font-weight="bold">EJE DE TRANSMISIÓN · REF. DEMO-EJ-250</text>
+  <line x1="150" y1="400" x2="1450" y2="400" stroke="#000" stroke-width="1" stroke-dasharray="30 8 4 8"/>
+  <g fill="none" stroke="#000" stroke-width="2.5">
+    <rect x="200" y="325" width="240" height="150"/>
+    <rect x="440" y="290" width="480" height="220"/>
+    <rect x="920" y="315" width="200" height="170"/>
+    <rect x="1120" y="335" width="80" height="130"/>
+    <rect x="560" y="290" width="200" height="25" fill="#e5e5e5"/>
+  </g>
+  <g stroke="#000" stroke-width="1" fill="none"><path d="M1120 345h80M1120 455h80" stroke-dasharray="4 4"/></g>
+  <g stroke="#000" stroke-width="1.5" font-size="22">
+    <line x1="200" y1="610" x2="1200" y2="610" marker-start="url(#f)" marker-end="url(#f)"/><text x="680" y="645" stroke="none">250</text>
+    <line x1="200" y1="560" x2="440" y2="560" marker-start="url(#f)" marker-end="url(#f)"/><text x="300" y="550" stroke="none">60</text>
+    <line x1="440" y1="560" x2="920" y2="560" marker-start="url(#f)" marker-end="url(#f)"/><text x="660" y="550" stroke="none">120</text>
+    <line x1="920" y1="560" x2="1120" y2="560" marker-start="url(#f)" marker-end="url(#f)"/><text x="1000" y="550" stroke="none">50</text>
+    <line x1="1120" y1="560" x2="1200" y2="560" marker-start="url(#f)" marker-end="url(#f)"/><text x="1140" y="550" stroke="none">20</text>
+    <text x="250" y="310" stroke="none">Ø30 h6</text><text x="640" y="270" stroke="none">Ø45</text><text x="960" y="300" stroke="none">Ø35 k6</text><text x="1110" y="320" stroke="none">M20×1,5</text>
+    <line x1="560" y1="240" x2="760" y2="240" marker-start="url(#f)" marker-end="url(#f)"/><text x="560" y="230" stroke="none">Chavetero 14 × 5,5 × 50 (DIN 6885)</text>
+  </g>
+  <g font-size="21">
+    <text x="60" y="760" font-weight="bold">NOTAS</text>
+    <text x="60" y="795">1. Material: 42CrMo4 (F-1252) bonificado 900-1100 N/mm².</text>
+    <text x="60" y="827">2. Rugosidad general Ra 3,2. Asientos Ø30 h6 y Ø35 k6: Ra 0,8 (rectificado).</text>
+    <text x="60" y="859">3. Chaflanes no indicados 1 × 45°. Aristas matadas.</text>
+    <text x="60" y="891">4. Punto de centrado DIN 332 tipo A en ambos extremos.</text>
+    <text x="60" y="923">5. Tolerancias generales ISO 2768-m.</text>
+    <text x="60" y="965" font-weight="bold">CANTIDAD: 25 UNIDADES</text>
+  </g>
+  <g font-size="18">
+    <rect x="1080" y="780" width="480" height="280" fill="none" stroke="#000" stroke-width="2"/>
+    <line x1="1080" y1="840" x2="1560" y2="840" stroke="#000"/><line x1="1080" y1="900" x2="1560" y2="900" stroke="#000"/><line x1="1080" y1="960" x2="1560" y2="960" stroke="#000"/>
+    <text x="1095" y="820">Cliente: MAQUINARIA EJEMPLO S.A. (ficticio)</text>
+    <text x="1095" y="880">Plano nº DEMO-002 · Rev. B</text>
+    <text x="1095" y="940">Escala 1:1 · Cotas en mm</text>
+    <text x="1095" y="1000">Ejemplo de demostración</text>
+    <text x="1095" y="1035">Datos inventados</text>
+  </g>
+</svg>

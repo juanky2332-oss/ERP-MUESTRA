@@ -1,89 +1,100 @@
-// Presupuesto desde plano (Chrome + IA real): sube un plano de pieza, un croquis
-// de mesa de inox y un esquema eléctrico, y comprueba que se lee lo dibujado,
-// que no se inventa lo que no está y que el precio sale de las tarifas/catálogo.
+// Presupuesto desde plano (motor de IndunexIA Presupuestos dentro del ERP), con Chrome e IA real:
+// sube el plano de prueba de la mesa de inox, comprueba el despiece (material en kg, operaciones,
+// componentes), edita el margen, guarda, y lo pasa a presupuesto del ERP con el cliente.
+// Uso: npm run test:planos   (BASE=http://localhost:3100 por defecto; GRABAR=<carpeta> guarda capturas)
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env.local'), quiet: true })
 const path = require('path')
+const fs = require('fs')
 const puppeteer = require('puppeteer-core')
 const cookieDe = require('./cookie')
 const APP = process.env.BASE || 'http://localhost:3100'
+const PLANO = process.env.PLANO || 'Mesa de inoxidable'
+const GRABAR = process.env.GRABAR || ''
 const esperar = ms => new Promise(r => setTimeout(r, ms))
 let ok = 0, fail = 0
 const check = (n, c, x = '') => { c ? ok++ : fail++; console.log(`${c ? '✅' : '❌'} ${n}${x ? ' — ' + String(x).slice(0, 300) : ''}`) }
 
 ;(async () => {
     const browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: 'new' })
+    const foto = async (page, n) => { if (GRABAR) { fs.mkdirSync(GRABAR, { recursive: true }); await page.screenshot({ path: path.join(GRABAR, n + '.png') }) } }
     try {
-        // Planos de prueba (ficticios) → PNG
-        const pngs = {}
-        const pg = await browser.newPage(); await pg.setViewport({ width: 1400, height: 900 })
-        for (const n of ['eje', 'mesa', 'esquema']) {
-            await pg.goto('file:///' + path.join(__dirname, 'planos', n + '.html').split(path.sep).join('/'))
-            pngs[n] = path.join(require('os').tmpdir(), `plano_${n}.png`)
-            await pg.screenshot({ path: pngs[n] })
-        }
-        await pg.close()
-
         const cookie = await cookieDe(process.env.TEST_USER_EMAIL)
         await browser.setCookie(...cookie.split('; ').map(c => { const i = c.indexOf('='); return { name: c.slice(0, i), value: c.slice(i + 1), domain: new URL(APP).hostname, path: '/' } }))
         const page = await browser.newPage(); await page.setViewport({ width: 1440, height: 1000 })
         const errores = []
         page.on('pageerror', e => errores.push(e.message))
-        const leer = async (n, modo) => {
-            await page.goto(APP + '/planos', { waitUntil: 'networkidle2' }); await esperar(2500)
-            await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find(b => b.innerText.trim() === 'Cerrar')?.click())
-            const input = await page.$('input[type=file]'); await input.uploadFile(pngs[n])
-            await page.evaluate(m => [...document.querySelectorAll('button')].find(b => b.innerText.startsWith(m))?.click(), modo)
-            await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.innerText.includes('Leer y presupuestar'))?.click())
-            await page.waitForFunction(() => !document.body.innerText.includes('Leyendo el plano'), { timeout: 120000 })
-            await esperar(800)
-            return page.evaluate(() => document.querySelector('main')?.innerText || document.body.innerText)
-        }
-        const valores = () => page.evaluate(() => [...document.querySelectorAll('main input, main select')].map(e => e.tagName === 'SELECT' ? e.options[e.selectedIndex]?.text : e.value))
 
-        const SOLO = process.env.SOLO || ''
-        let txt, v
-        // 1) Pieza mecanizada
-        if (!SOLO || SOLO === 'eje') {
-        txt = await leer('eje', 'Pieza mecanizada')
-        v = await valores()
-        check('Pieza: material 42CrMo4 reconocido', v.some(x => /42CrMo4/.test(x || '')), v.slice(0, 8).join(' | '))
-        check('Pieza: cantidad 12', v.includes('12'))
-        check('Pieza: diámetro mayor 80 y largo 900', v.includes('80') && v.includes('900'), v.join(' | '))
-        check('Pieza: tolerancias y tratamiento leídos', /h7|k6/i.test(txt) && /Nitrurado/i.test(txt))
-        await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.innerText.includes('Abrir en la calculadora'))?.click())
-        await page.waitForFunction(() => location.pathname === '/calculadora', { timeout: 15000 }).catch(() => { })
-        await esperar(3500)
-        const calc = await page.evaluate(() => document.body.innerText)
-        check('Pieza: se abre en la calculadora con precio calculado', /cargada desde el plano/.test(calc) || /Precio por pieza/.test(calc), calc.match(/Precio por pieza[\s\S]{0,40}/)?.[0])
+        await page.goto(APP + '/planos', { waitUntil: 'networkidle2' }); await esperar(2500)
+        await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find(b => b.innerText.trim() === 'Cerrar')?.click())
+        const portada = await page.evaluate(() => document.body.innerText)
+        check('Página carga con la subida y el historial', /Despiezar y presupuestar/.test(portada) && /Planos presupuestados/.test(portada))
+        await foto(page, '01-subir')
 
+        // Plano de prueba (ID=<plano ya leído> se salta la lectura con IA)
+        if (process.env.ID) { await page.goto(APP + '/planos/' + process.env.ID, { waitUntil: 'networkidle2' }) } else {
+        await page.evaluate(n => [...document.querySelectorAll('button')].find(b => b.innerText.includes(n))?.click(), PLANO)
+        await page.waitForFunction(() => !!document.querySelector('figure img'), { timeout: 15000 })
+        await foto(page, '02-plano')
+        const t0 = Date.now()
+        await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.innerText.includes('Despiezar y presupuestar'))?.click())
+        await esperar(4000)
+        await foto(page, '03-leyendo')
+        await page.waitForFunction(() => /\/planos\/[0-9a-f-]{36}/.test(location.pathname), { timeout: 240000 })
+        await page.waitForFunction(() => document.body.innerText.includes('Total con IVA'), { timeout: 30000 })
+        await esperar(1500)
+        console.log(`   (lectura en ${Math.round((Date.now() - t0) / 1000)} s)`)
         }
-        // 2) Mesa de inox
-        if (!SOLO || SOLO === 'mesa') {
-        txt = await leer('mesa', 'Calderería')
-        v = await valores()
-        check('Mesa: modo calderería con despiece', /Despiece/.test(txt), txt.slice(0, 200))
-        check('Mesa: inox AISI 304', v.some(x => /304/.test(x || '')))
-        check('Mesa: chapa de 1,5 mm', v.includes('1.5') || v.includes('1,5'), v.join(' | '))
-        check('Mesa: 6 unidades del conjunto (no del estante)', v[2] === '6', `unidades=${v[2]}`)
-        const iT = v.indexOf('Tablero') >= 0 ? v.indexOf('Tablero') : v.findIndex(x => /tablero/i.test(x || ''))
-        check('Mesa: tablero en desarrollo con faldón (1280 × 780)', v.slice(iT, iT + 9).includes('1280') && v.slice(iT, iT + 9).includes('780'), v.slice(iT, iT + 9).join(' | '))
-        check('Mesa: patas con largo (deducido del alto)', v.some(x => x === '898.5' || x === '900' || x === '898,5'))
-        const precio = txt.match(/Precio por unidad \(sin IVA\)\s*([\d.,]+\s*€)/i)?.[1]
-        check('Mesa: precio por unidad calculado', !!precio, precio)
+        await page.waitForFunction(() => document.body.innerText.includes('Total con IVA'), { timeout: 30000 }); await esperar(1500)
+        let txt = await page.evaluate(() => document.querySelector('main')?.innerText || document.body.innerText)
+        check('Editor abierto con el despiece', /Material/.test(txt) && /Fabricación y servicios/.test(txt), txt.slice(0, 200))
+        check('Material calculado en kg con inoxidable', /kg/.test(txt) && /304|Inoxidable/i.test(txt))
+        check('Hay soldadura o plegado entre las operaciones', /sold|pleg/i.test(txt))
+        check('Total con IVA mayor que cero', /Total con IVA\s*\n?\s*[1-9][\d.]*,\d{2}\s*€/.test(txt), txt.match(/Total con IVA[\s\S]{0,30}/)?.[0])
+        await foto(page, '04-editor')
 
+        // Lista de compra
+        await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'Ver lista')?.click())
+        await esperar(800)
+        txt = await page.evaluate(() => document.body.innerText)
+        check('Lista de compra con barras o chapas enteras', /barras de|chapas? \d/i.test(txt), txt.match(/Lista de material[\s\S]{0,120}/)?.[0])
+        await page.evaluate(() => document.querySelector('[id=resumen]')?.scrollIntoView())
+        await foto(page, '05-compra')
+
+        // Margen 40 % → se guarda solo
+        await page.evaluate(() => { const i = document.querySelectorAll('#resumen input')[1]; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, '40'); i.dispatchEvent(new Event('input', { bubbles: true })) })
+        await page.waitForFunction(() => document.body.innerText.includes('✓ Guardado'), { timeout: 15000 }).catch(() => { })
+        await esperar(2500)
+        txt = await page.evaluate(() => document.body.innerText)
+        check('Margen cambiado y guardado', /Beneficio \(40 %\)/.test(txt) && /✓ Guardado/.test(txt))
+
+        // Cliente + pasar a presupuesto
+        const combo = await page.$('main [role=combobox]'); await page.evaluate(() => window.scrollTo(0, 0))
+        await combo.click(); await esperar(800)
+        await page.keyboard.type(process.env.CLIENTE || 'CLIENTE DEMO 1'); await esperar(1500)
+        await page.keyboard.press('Enter')
+        await esperar(1500)
+        await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.innerText.trim() === 'Pasar a presupuesto')?.click())
+        await page.waitForFunction(() => /Pasado a PREP-/.test(document.body.innerText), { timeout: 30000 }).catch(() => { })
+        txt = await page.evaluate(() => document.body.innerText)
+        const numero = txt.match(/Pasado a (PREP-[\w-]+)/)?.[1]
+        check('Presupuesto creado en el ERP', !!numero, numero)
+        await foto(page, '06-pasado')
+
+        if (numero) {
+            await page.goto(APP + '/presupuestos?q=' + encodeURIComponent(numero), { waitUntil: 'networkidle2' }); await esperar(3000)
+            const lista = await page.evaluate(() => document.body.innerText)
+            check('El presupuesto sale en Presupuestos', lista.includes(numero))
+            await foto(page, '07-presupuesto')
         }
-        // 3) Esquema eléctrico
-        if (!SOLO || SOLO === 'esquema') {
-        txt = await leer('esquema', 'Esquema')
-        if (process.env.VER) console.log(txt)
-        check('Esquema: contactores 9A (×2) leídos', /Contactor/i.test(txt) && /9 ?A/.test(txt), txt.slice(0, 300))
-        check('Esquema: guardamotores y diferencial', /Guardamotor/i.test(txt) && /Diferencial/i.test(txt))
-        check('Esquema: sin precios inventados (no están en el catálogo)', /sin precio/i.test(txt))
-        }
-        check('Sin errores de JavaScript', errores.length === 0, errores.join(' | '))
+        await page.goto(APP + '/planos', { waitUntil: 'networkidle2' }); await esperar(2500)
+        txt = await page.evaluate(() => document.body.innerText)
+        check('Historial con el plano y su presupuesto', numero ? txt.includes(numero) : false)
+        check('Sin errores de página', errores.length === 0, errores.join(' | '))
+    } catch (e) {
+        check('Prueba completa', false, e.message)
     } finally {
         await browser.close()
-        console.log(`\n${ok} OK · ${fail} fallos`)
+        console.log(`\n${ok} bien, ${fail} mal`)
         process.exit(fail ? 1 : 0)
     }
 })()
